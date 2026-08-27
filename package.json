@@ -24,6 +24,7 @@
     "@sveltejs/adapter-node": "^5.2.0",
     "@sveltejs/kit": "^2.7.0",
     "@sveltejs/vite-plugin-svelte": "^4.0.0",
+    "@types/node": "^22.7.0",
     "@vitest/coverage-v8": "^2.1.0",
     "drizzle-kit": "^0.26.0",
     "dotenv": "^16.4.5",

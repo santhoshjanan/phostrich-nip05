@@ -81,11 +81,30 @@ describe('POST /auth/verify', () => {
     await valkey.del('ratelimit:verify:pubkey:' + pubkey);
   });
 
-  it('returns 401 when the pubkey is not 64-hex', async () => {
-    const { event: evt } = requestEvent({
-      event: { pubkey: 'not-a-valid-pubkey', kind: 27235, tags: [] }
-    });
+  it('returns 401 when the pubkey is not 64-hex, and never reaches the rate limiter', async () => {
+    const sk = generateSecretKey();
+    const pubkey = getPublicKey(sk);
+    const nonce = await issueChallenge(pubkey);
+    const event = buildEvent(nonce, sk);
+    // Otherwise well-formed (matching u/method/challenge tags, valid
+    // created_at, correct kind, real signature) except the pubkey field is
+    // swapped for a non-64-hex string. Because verifyAuthEvent/verifyEvent
+    // would also independently reject this (the signature no longer matches
+    // the swapped pubkey), a bare status-401 assertion wouldn't actually
+    // pin down the PUBKEY_PATTERN guard — the response would still be 401
+    // via that unrelated downstream path even without the guard. Instead we
+    // assert that no rate-limit key is ever created for the bogus pubkey,
+    // which can only be true if the guard rejects before checkRateLimit
+    // (whose first action is `valkey.incr`) is ever called.
+    const malformedPubkey = 'not-a-valid-pubkey';
+    const malformed = { ...event, pubkey: malformedPubkey };
+
+    const { event: evt } = requestEvent({ event: malformed });
     const response = await POST(evt as unknown as Parameters<typeof POST>[0]);
     expect(response.status).toBe(401);
+    expect(await valkey.exists('ratelimit:verify:pubkey:' + malformedPubkey)).toBe(0);
+
+    await valkey.del('ratelimit:verify:pubkey:' + pubkey);
+    await valkey.del('ratelimit:verify:pubkey:' + malformedPubkey);
   });
 });

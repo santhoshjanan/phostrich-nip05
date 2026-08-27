@@ -42,7 +42,7 @@ One Drizzle table, `identifiers`:
 
 | column | type | notes |
 |---|---|---|
-| `id` | uuid/serial | PK |
+| `id` | bigserial | PK; never exposed publicly, so no need for UUID's non-enumerability |
 | `name` | text | unique, stored normalized (lowercase) |
 | `status` | enum (`claimed`\|`reserved`\|`blocked`) | only `claimed` resolves publicly |
 | `owner_pubkey` | text, nullable | 32-byte lowercase hex, no FK yet (no users table until auth lands) |

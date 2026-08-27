@@ -1,4 +1,4 @@
-// src/routes/auth/verify/+server.test.ts
+// src/routes/auth/verify/server.test.ts
 import { describe, expect, it } from 'vitest';
 import { finalizeEvent, generateSecretKey, getPublicKey, type EventTemplate } from 'nostr-tools';
 import { valkey } from '$lib/server/valkey';
@@ -79,5 +79,13 @@ describe('POST /auth/verify', () => {
     expect(response.status).toBe(401);
 
     await valkey.del('ratelimit:verify:pubkey:' + pubkey);
+  });
+
+  it('returns 401 when the pubkey is not 64-hex', async () => {
+    const { event: evt } = requestEvent({
+      event: { pubkey: 'not-a-valid-pubkey', kind: 27235, tags: [] }
+    });
+    const response = await POST(evt as unknown as Parameters<typeof POST>[0]);
+    expect(response.status).toBe(401);
   });
 });

@@ -9,13 +9,19 @@ import { config } from '$lib/server/config';
 
 const VERIFY_PUBKEY_LIMIT = 10;
 const WINDOW_SECONDS = 300;
+const PUBKEY_PATTERN = /^[0-9a-f]{64}$/;
 
 export const POST: RequestHandler = async ({ request, cookies }) =>
   withAuthErrorHandling(async () => {
     const body = await request.json().catch(() => null);
     const event = body?.event as Event | undefined;
 
-    if (!event || typeof event.pubkey !== 'string' || !Array.isArray(event.tags)) {
+    if (
+      !event ||
+      typeof event.pubkey !== 'string' ||
+      !PUBKEY_PATTERN.test(event.pubkey) ||
+      !Array.isArray(event.tags)
+    ) {
       return json({ error: 'authentication failed' }, { status: 401 });
     }
 

@@ -4,7 +4,10 @@ import { z } from 'zod';
 const envSchema = z.object({
   DATABASE_URL: z.string().url(),
   VALKEY_URL: z.string().url(),
-  PUBLIC_ORIGIN: z.string().url(),
+  PUBLIC_ORIGIN: z
+    .string()
+    .url()
+    .transform((val) => val.replace(/\/+$/, '')),
   DEFAULT_RELAYS: z
     .string()
     .default('')

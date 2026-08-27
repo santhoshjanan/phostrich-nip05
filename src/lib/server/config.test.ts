@@ -57,4 +57,10 @@ describe('config', () => {
     const { config } = await import('./config?t=' + Date.now());
     expect(config.SESSION_TTL_DAYS).toBe(7);
   });
+
+  it('strips a trailing slash from PUBLIC_ORIGIN', async () => {
+    Object.assign(process.env, REQUIRED_ENV, { PUBLIC_ORIGIN: 'https://phostrich.com/' });
+    const { config } = await import('./config?t=' + Date.now());
+    expect(config.PUBLIC_ORIGIN).toBe('https://phostrich.com');
+  });
 });

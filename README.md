@@ -36,6 +36,14 @@ Backend-only in this slice — no login UI yet. The flow:
 
 `SESSION_TTL_DAYS` (default 30) controls how long a session lasts.
 
+IP-axis rate limiting (`/auth/challenge`, `/auth/verify`) relies on SvelteKit's
+`getClientAddress()`. Deployed behind a reverse proxy (as `adapter-node`
+typically is), this returns the proxy's own address unless the adapter is
+told which header to trust and how many hops to peel off — otherwise every
+request collapses into a single shared rate-limit bucket. Check
+`@sveltejs/adapter-node`'s current docs for the relevant env vars before
+deploying behind a proxy.
+
 ## Other commands
 
     pnpm check        # svelte-check + TypeScript

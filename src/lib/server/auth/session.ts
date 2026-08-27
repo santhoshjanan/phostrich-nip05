@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { valkey } from '../valkey';
 import { config } from '../config';
 
-export const SESSION_COOKIE_NAME = 'phostrich_session';
+export const SESSION_COOKIE_NAME = '__Host-phostrich_session';
 
 interface SessionData {
   pubkey: string;
@@ -26,11 +26,17 @@ export async function createSession(pubkey: string): Promise<string> {
 
 export async function getSession(sessionId: string): Promise<{ pubkey: string } | null> {
   const key = sessionKey(sessionId);
-  const raw = await valkey.get(key);
+  const raw = await valkey.getex(key, 'EX', ttlSeconds());
   if (!raw) return null;
-  await valkey.expire(key, ttlSeconds());
-  const data = JSON.parse(raw) as SessionData;
-  return { pubkey: data.pubkey };
+  try {
+    const data = JSON.parse(raw) as SessionData;
+    return { pubkey: data.pubkey };
+  } catch {
+    // Corrupt stored value: treat as "no session" rather than throwing —
+    // this also protects hooks.server.ts from crashing the whole site on
+    // a bad Valkey value.
+    return null;
+  }
 }
 
 export async function destroySession(sessionId: string): Promise<void> {

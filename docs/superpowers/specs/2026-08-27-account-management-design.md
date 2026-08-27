@@ -1,0 +1,68 @@
+# Account Management — Design
+
+Sub-project 4 of the Phostrich build order (see `docs/SPEC.md` for full product/architecture context, and the Foundation/Auth/Claim-flow design docs this depends on). Adds the persistent account page: relay list editing, release, and inactivity status display. Extends the already-established Issued Credential visual world from the Claim flow sub-project — no new concept tournament, per Impeccable's own "extend an existing surface" path.
+
+## Scope
+
+**In scope:**
+- `/account` — identifier display, relay editing, inactivity status, release
+- `PUT /api/account/relays`, `POST /api/account/release`
+- `src/lib/server/identifiers/relays.ts` — shared relay-list validator
+- Amending Claim flow's `/claim` redirect target (already-owns-one case: `/claimed` → `/account`)
+
+**Explicitly out of scope:**
+- Admin dashboard, reservation management, force-release — sub-project 5
+- The daily inactivity-scan job and its admin report — sub-project 6 (this sub-project only *displays* the computed dates; it doesn't compute or act on expiry itself)
+
+**No new migration needed.** `identifier_events.eventType` already includes `'released'` — Claim flow's schema anticipated this.
+
+## Routes and endpoints
+
+- **`/account`** — server `load`: redirect `/login` if unauthenticated; redirect `/claim` if the user owns no claimed identifier; otherwise loads the identifier name, `relays`, and `last_identified_at`. Renders the identifier (read-only), editable relay rows, the inactivity status, and the release action.
+- **`PUT /api/account/relays`** — auth required. Body `{relays: string[]}`. Validated by `validateRelayList` (below), persisted, then `invalidateIdentifier(name)` — relay edits invalidate the same cache entry a claim does. Validation errors are specific (`"relay 2: must start with wss://"`), unlike the claim/availability endpoints' deliberately vague responses — that vagueness protects against strangers probing the system; this is a user editing their own authenticated data, where specific feedback is just good UX, not a leak.
+- **`POST /api/account/release`** — auth required, no body. One transaction: delete the `identifiers` row, insert an `identifier_events` row (`eventType: 'released'`, `actorPubkey` = caller, `reason: null`), then invalidate the cache after commit. 404 if the caller owns nothing (edge case — `/account` itself redirects away before this is normally reachable).
+
+**Amendment to Claim flow:** `/claim`'s server load, in the "already owns a claimed identifier" branch, now redirects to `/account` instead of `/claimed`. `/claimed` stays purely the one-time post-claim confirmation; `/account` is the ongoing management home.
+
+## `validateRelayList`
+
+`src/lib/server/identifiers/relays.ts`, shared by the route and (indirectly, by validating the same shape) anything else that ever needs to check a relay list:
+
+- Cap: 8 relays.
+- Scheme: `wss://` required; `ws://` permitted only when `NODE_ENV !== 'production'`.
+- Must be a parseable URL with no userinfo (`user:pass@`) and no query string.
+- Deduplicated after normalizing the trailing slash; order preserved (first occurrence wins).
+
+## Data flow
+
+Edit relay rows client-side (add/remove/edit) → Save → `PUT /api/account/relays` with the full array → server validates + persists + invalidates → page re-renders from the response. Release → confirm modal (same hard-interrupt pattern as the claim-time expiry modal: no outside-click dismiss, explicit affirmative action) → `POST /api/account/release` → on success, redirect to `/claim`.
+
+## Inactivity status display
+
+Always shown together, same calm tone, no urgent color escalation (consistent with the direction's single-hairline-accent restraint and the "disclose policy up front, not as a surprise" product principle):
+- **Last verified:** `last_identified_at`, formatted date.
+- **Eligible for release after:** `last_identified_at` + 6 months, formatted date.
+
+Both computed client-side from `last_identified_at` returned by the load function — no new backend computation needed, since the 6-month constant is already fixed (`docs/SPEC.md`).
+
+## Error handling
+
+- `PUT /api/account/relays` → 401 unauthenticated; specific validation-error messages (see above) otherwise.
+- `POST /api/account/release` → 401 unauthenticated; 404 if the caller owns nothing.
+- `invalidateIdentifier` failures stay fail-open, same as every other write path in the project — a stale cache entry self-heals via its TTL.
+
+## Visual direction
+
+Extends the Issued Credential world (navy/cream/oxblood, engraved-serif display + mono metadata, ruled fields, single hairline accent) rather than introducing new material:
+
+- Relay list: **individual ruled rows**, one relay per row with its own remove action, plus an "add relay" action below the last row — matches the document metaphor's "one fact per ruled line" and makes per-row validation errors easy to place inline. (Considered and rejected: a single free-form textarea — faster to bulk-edit, but breaks the ruled-field metaphor and makes per-line errors awkward to place.)
+- Release confirmation: an explicit modal, no outside-click dismiss, requiring an affirmative action — the same hard-interrupt pattern already established for the claim-time expiry modal, not a heavier "type the name to confirm" flow, which would be disproportionate given the modal already states the consequence plainly.
+- Inactivity status: two calm evidentiary lines (as above), not a warning badge or color shift — consistent with the "evidence-framed states" discipline the Claim flow direction already committed to.
+
+## Testing
+
+- `validateRelayList`: unit tests — cap, `wss://` requirement, dev-only `ws://` allowance, dedupe, parseable-URL/userinfo/query-string rejection.
+- `PUT /api/account/relays` and `POST /api/account/release`: happy path, validation/auth/not-found errors, real Postgres/Valkey (no mocks, consistent with every prior sub-project).
+- `/account` load: auth guard, redirect-to-`/claim` when nothing owned, correct data shape (identifier, relays, both computed dates).
+- Playwright e2e: extend the existing claim-flow scenario — after claiming, edit a relay and save, then release, reusing the fake-`window.nostr` sign-in pattern already built in Claim flow's e2e test.
+- 90% coverage gate applies; `.svelte` files stay excluded per Claim flow's existing Vitest config.

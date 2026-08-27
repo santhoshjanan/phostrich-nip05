@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from './index';
 import { identifiers } from './schema';
@@ -99,5 +99,31 @@ describe('resolveIdentifier', () => {
 
     const [row] = await db.select().from(identifiers).where(eq(identifiers.name, TEST_NAME));
     expect(row.lastIdentifiedAt.getTime()).toBe(freshDate.getTime());
+  });
+
+  it('still returns the resolved result when the best-effort staleness-bump write fails', async () => {
+    const staleDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    await db.insert(identifiers).values({
+      name: TEST_NAME,
+      status: 'claimed',
+      ownerPubkey: TEST_PUBKEY,
+      relays: ['wss://relay.example'],
+      lastIdentifiedAt: staleDate
+    });
+
+    // Force just the staleness-bump update to throw, without touching shared
+    // test infra: spy on db.update for the duration of this test only, so
+    // the update call inside resolveIdentifier rejects while everything else
+    // (the select, the cache write) behaves normally.
+    const updateSpy = vi.spyOn(db, 'update').mockImplementation(() => {
+      throw new Error('simulated transient update failure');
+    });
+
+    try {
+      const result = await resolveIdentifier(TEST_NAME);
+      expect(result).toEqual({ pubkey: TEST_PUBKEY, relays: ['wss://relay.example'] });
+    } finally {
+      updateSpy.mockRestore();
+    }
   });
 });

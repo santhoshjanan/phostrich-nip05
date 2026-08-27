@@ -51,10 +51,15 @@ export async function resolveIdentifier(name: string): Promise<ResolvedIdentifie
   // cache above it. A day of slack is far more than enough precision for
   // a 6-month inactivity threshold (see docs/SPEC.md).
   if (Date.now() - row.lastIdentifiedAt.getTime() > STALE_AFTER_MS) {
-    await db
-      .update(identifiers)
-      .set({ lastIdentifiedAt: new Date() })
-      .where(and(eq(identifiers.name, name), lt(identifiers.lastIdentifiedAt, new Date(Date.now() - STALE_AFTER_MS))));
+    try {
+      await db
+        .update(identifiers)
+        .set({ lastIdentifiedAt: new Date() })
+        .where(and(eq(identifiers.name, name), lt(identifiers.lastIdentifiedAt, new Date(Date.now() - STALE_AFTER_MS))));
+    } catch {
+      // best-effort side effect on an otherwise-successful read; a flaky
+      // write here must never sour an otherwise-good read (see cacheSet)
+    }
   }
 
   const result: ResolvedIdentifier = { pubkey: row.ownerPubkey, relays: row.relays };

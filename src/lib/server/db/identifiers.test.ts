@@ -126,4 +126,52 @@ describe('resolveIdentifier', () => {
       updateSpy.mockRestore();
     }
   });
+
+  it('fails open to Postgres when the cache read throws', async () => {
+    await db.insert(identifiers).values({
+      name: TEST_NAME,
+      status: 'claimed',
+      ownerPubkey: TEST_PUBKEY,
+      relays: ['wss://relay.example']
+    });
+
+    const getSpy = vi.spyOn(valkey, 'get').mockImplementation(() => {
+      throw new Error('simulated cache outage');
+    });
+
+    try {
+      const result = await resolveIdentifier(TEST_NAME);
+      expect(result).toEqual({ pubkey: TEST_PUBKEY, relays: ['wss://relay.example'] });
+    } finally {
+      getSpy.mockRestore();
+    }
+  });
+
+  it('returns null from the negative cache on a repeated miss', async () => {
+    const first = await resolveIdentifier(TEST_NAME);
+    expect(first).toBeNull();
+
+    const second = await resolveIdentifier(TEST_NAME);
+    expect(second).toBeNull();
+  });
+
+  it('swallows a cache write failure on a successful resolve', async () => {
+    await db.insert(identifiers).values({
+      name: TEST_NAME,
+      status: 'claimed',
+      ownerPubkey: TEST_PUBKEY,
+      relays: ['wss://relay.example']
+    });
+
+    const setSpy = vi.spyOn(valkey, 'set').mockImplementation(() => {
+      throw new Error('simulated cache write failure');
+    });
+
+    try {
+      const result = await resolveIdentifier(TEST_NAME);
+      expect(result).toEqual({ pubkey: TEST_PUBKEY, relays: ['wss://relay.example'] });
+    } finally {
+      setSpy.mockRestore();
+    }
+  });
 });

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { checkHealth, GET } from './+server';
+import { db } from '$lib/server/db';
 
 describe('checkHealth', () => {
   it('reports ok when both dependencies succeed', async () => {
@@ -32,5 +33,19 @@ describe('GET /healthz', () => {
     const response = await GET({} as unknown as Parameters<typeof GET>[0]);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, postgres: true, valkey: true });
+  });
+
+  it('returns 503 when a dependency is down', async () => {
+    const executeSpy = vi
+      .spyOn(db, 'execute')
+      .mockImplementation(() => Promise.reject(new Error('simulated Postgres outage')) as never);
+
+    try {
+      const response = await GET({} as unknown as Parameters<typeof GET>[0]);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ ok: false, postgres: false, valkey: true });
+    } finally {
+      executeSpy.mockRestore();
+    }
   });
 });

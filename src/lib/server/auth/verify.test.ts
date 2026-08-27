@@ -72,6 +72,28 @@ describe('verifyAuthEvent', () => {
     ).toBeNull();
   });
 
+  it('rejects a mismatched u tag', async () => {
+    const sk = generateSecretKey();
+    const pubkey = getPublicKey(sk);
+    const nonce = await issueChallenge(pubkey);
+
+    expect(
+      await verifyAuthEvent(
+        buildEvent({ challenge: nonce, url: `${config.PUBLIC_ORIGIN}/other-path` }, sk)
+      )
+    ).toBeNull();
+  });
+
+  it('rejects a non-POST method tag', async () => {
+    const sk = generateSecretKey();
+    const pubkey = getPublicKey(sk);
+    const nonce = await issueChallenge(pubkey);
+
+    expect(
+      await verifyAuthEvent(buildEvent({ challenge: nonce, method: 'GET' }, sk))
+    ).toBeNull();
+  });
+
   it('rejects a mismatched challenge', async () => {
     const sk = generateSecretKey();
     const pubkey = getPublicKey(sk);

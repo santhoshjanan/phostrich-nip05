@@ -85,3 +85,20 @@ async function cacheSet(key: string, value: string, ttlSeconds: number): Promise
     // cache write failures are non-fatal; Postgres remains the source of truth
   }
 }
+
+export async function invalidateIdentifier(name: string): Promise<void> {
+  try {
+    await valkey.del(CACHE_PREFIX + name);
+  } catch {
+    // best-effort; a stale cache entry self-heals via its own TTL
+  }
+}
+
+export async function identifierNameExists(name: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: identifiers.id })
+    .from(identifiers)
+    .where(eq(identifiers.name, name))
+    .limit(1);
+  return row !== undefined;
+}

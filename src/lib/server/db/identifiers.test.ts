@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db } from './index';
 import { identifiers } from './schema';
 import { valkey } from '../valkey';
-import { resolveIdentifier } from './identifiers';
+import { resolveIdentifier, invalidateIdentifier, identifierNameExists } from './identifiers';
 
 const TEST_NAME = 'foundation-resolve-test';
 const TEST_PUBKEY = 'd'.repeat(64);
@@ -189,5 +189,37 @@ describe('resolveIdentifier', () => {
     } finally {
       setSpy.mockRestore();
     }
+  });
+});
+
+describe('invalidateIdentifier', () => {
+  const NAME = 'foundation-invalidate-test';
+
+  afterEach(async () => {
+    await valkey.del('identifier:' + NAME);
+  });
+
+  it('removes a cached entry', async () => {
+    await valkey.set('identifier:' + NAME, JSON.stringify({ pubkey: 'a'.repeat(64), relays: [] }), 'EX', 300);
+    await invalidateIdentifier(NAME);
+    expect(await valkey.get('identifier:' + NAME)).toBeNull();
+  });
+
+  it('does not throw when there is nothing cached', async () => {
+    await invalidateIdentifier('never-cached-' + Date.now());
+  });
+});
+
+describe('identifierNameExists', () => {
+  const NAME = 'foundation-exists-test';
+
+  afterEach(async () => {
+    await db.delete(identifiers).where(eq(identifiers.name, NAME));
+  });
+
+  it('returns true for a row of any status, false when no row exists', async () => {
+    await db.insert(identifiers).values({ name: NAME, status: 'reserved', ownerPubkey: null });
+    expect(await identifierNameExists(NAME)).toBe(true);
+    expect(await identifierNameExists('definitely-not-there-' + Date.now())).toBe(false);
   });
 });

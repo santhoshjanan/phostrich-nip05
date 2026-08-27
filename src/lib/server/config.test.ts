@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const REQUIRED_ENV = {
   DATABASE_URL: 'postgres://user:pass@localhost:5432/phostrich',
@@ -10,6 +10,7 @@ describe('config', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
+    vi.resetModules();
     process.env = { ...originalEnv };
   });
 

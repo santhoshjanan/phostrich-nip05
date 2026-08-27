@@ -25,6 +25,17 @@ The NIP-05 endpoint is then available at:
 Running the test suite clears the seeded fixture rows (they share names with the dev seed
 data) — re-run `pnpm db:seed` afterward if you need them back for manual testing.
 
+## Auth
+
+Backend-only in this slice — no login UI yet. The flow:
+
+    POST /auth/challenge {"pubkey": "<64-hex>"}   -> {"challenge": "<nonce>"}
+    # client signs a kind 27235 event: tags u=<origin>/auth/verify, method=POST, challenge=<nonce>
+    POST /auth/verify {"event": {...signed event...}}   -> 200 + Set-Cookie, or 401
+    POST /auth/logout                                    -> 200, clears the session
+
+`SESSION_TTL_DAYS` (default 30) controls how long a session lasts.
+
 ## Other commands
 
     pnpm check        # svelte-check + TypeScript

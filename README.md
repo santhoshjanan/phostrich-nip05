@@ -44,6 +44,14 @@ request collapses into a single shared rate-limit bucket. Check
 `@sveltejs/adapter-node`'s current docs for the relevant env vars before
 deploying behind a proxy.
 
+## Claim flow
+
+- `/login` — sign in with a NIP-07 extension or a NIP-46 bunker connection.
+- `/claim` — pick an available identifier name; a 6-month inactivity policy is shown before the claim is confirmed.
+- `/claimed` — the issued identifier, with a copy button.
+
+New env for e2e only: `PUBLIC_ORIGIN` must match wherever `pnpm preview` actually serves (default `http://localhost:4173`), since the client's signed auth event and the server's check of it both depend on this value matching exactly.
+
 ## Other commands
 
     pnpm check        # svelte-check + TypeScript

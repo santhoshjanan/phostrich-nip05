@@ -20,15 +20,18 @@ export const POST: RequestHandler = async ({ request, cookies, getClientAddress 
       return json({ error: 'authentication failed' }, { status: 401 });
     }
 
-    // Rate-limit keying needs some string, but validating its shape is
-    // verifyAuthEvent's job now (via the Zod schema) — here we just need a
-    // safe string to build a Valkey key from.
-    const pubkeyForRateLimit =
+    // Rate-limit keying needs some string, but validating an event's shape
+    // is verifyAuthEvent's job now (via the Zod schema) — this is purely a
+    // safety bound so an attacker can't turn an arbitrary (e.g. 100KB)
+    // string into a Valkey key; it is not a correctness/validation gate.
+    const rawPubkey =
       typeof event === 'object' &&
       event !== null &&
       typeof (event as { pubkey?: unknown }).pubkey === 'string'
         ? (event as { pubkey: string }).pubkey
-        : 'invalid';
+        : null;
+    const pubkeyForRateLimit =
+      rawPubkey && /^[0-9a-f]{64}$/.test(rawPubkey) ? rawPubkey : 'invalid';
 
     const ip = getClientAddress();
     const ipAllowed = await checkRateLimit(
@@ -36,12 +39,16 @@ export const POST: RequestHandler = async ({ request, cookies, getClientAddress 
       VERIFY_IP_LIMIT,
       WINDOW_SECONDS
     );
+    if (!ipAllowed) {
+      return json({ error: 'rate limited' }, { status: 429 });
+    }
+
     const pubkeyAllowed = await checkRateLimit(
       `ratelimit:verify:pubkey:${pubkeyForRateLimit}`,
       VERIFY_PUBKEY_LIMIT,
       WINDOW_SECONDS
     );
-    if (!ipAllowed || !pubkeyAllowed) {
+    if (!pubkeyAllowed) {
       return json({ error: 'rate limited' }, { status: 429 });
     }
 

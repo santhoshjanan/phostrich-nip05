@@ -96,7 +96,32 @@ describe('POST /auth/verify', () => {
 
     await valkey.del('ratelimit:verify:pubkey:' + pubkey);
     await valkey.del('ratelimit:verify:pubkey:' + malformedPubkey);
+    await valkey.del('ratelimit:verify:pubkey:invalid');
     await valkey.del('ratelimit:verify:ip:127.0.0.1');
+  });
+
+  it('bounds the rate-limit key for an oversized attacker-controlled pubkey string instead of using it verbatim', async () => {
+    const hugePubkey = 'f'.repeat(100_000);
+    const malformed = {
+      pubkey: hugePubkey,
+      kind: 27235,
+      created_at: Math.floor(Date.now() / 1000),
+      id: 'a'.repeat(64),
+      sig: 'a'.repeat(128),
+      content: '',
+      tags: []
+    };
+
+    const { event: evt } = requestEvent({ event: malformed }, '127.0.0.5');
+    const response = await POST(evt as unknown as Parameters<typeof POST>[0]);
+    expect(response.status).toBe(401);
+
+    // The oversized string must never become part of a Valkey key — only
+    // the bounded fallback key should exist.
+    expect(await valkey.exists('ratelimit:verify:pubkey:' + hugePubkey)).toBe(0);
+    expect(await valkey.exists('ratelimit:verify:pubkey:invalid')).toBe(1);
+
+    await valkey.del('ratelimit:verify:pubkey:invalid', 'ratelimit:verify:ip:127.0.0.5');
   });
 
   describe('malformed tags shapes (must be 401, never 500/503)', () => {
@@ -177,5 +202,35 @@ describe('POST /auth/verify', () => {
     expect(response.status).toBe(429);
 
     await valkey.del('ratelimit:verify:pubkey:' + pubkey, 'ratelimit:verify:ip:' + ip);
+  });
+
+  it('short-circuits on the IP axis, never creating a rate-limit key for a fresh victim pubkey', async () => {
+    const ip = '127.0.0.6';
+    await valkey.del('ratelimit:verify:ip:' + ip);
+
+    for (let i = 0; i < 20; i++) {
+      const sk = generateSecretKey();
+      const pubkey = getPublicKey(sk);
+      const nonce = await issueChallenge(pubkey);
+      const event = buildEvent(nonce, sk);
+      const { event: evt } = requestEvent({ event }, ip);
+      const resp = await POST(evt as unknown as Parameters<typeof POST>[0]);
+      await valkey.del('ratelimit:verify:pubkey:' + pubkey);
+      expect(resp.status).not.toBe(429);
+    }
+
+    // IP axis is now exhausted. A request naming a never-before-seen
+    // "victim" pubkey must be rejected on the IP axis alone — the
+    // pubkey-axis check (and its Valkey key) must never be reached.
+    const victimSk = generateSecretKey();
+    const victimPubkey = getPublicKey(victimSk);
+    const nonce = await issueChallenge(victimPubkey);
+    const event = buildEvent(nonce, victimSk);
+    const { event: evt } = requestEvent({ event }, ip);
+    const response = await POST(evt as unknown as Parameters<typeof POST>[0]);
+    expect(response.status).toBe(429);
+    expect(await valkey.exists('ratelimit:verify:pubkey:' + victimPubkey)).toBe(0);
+
+    await valkey.del('ratelimit:verify:pubkey:' + victimPubkey, 'ratelimit:verify:ip:' + ip);
   });
 });

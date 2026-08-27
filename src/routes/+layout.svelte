@@ -12,4 +12,16 @@ FORM: adapted Issued Credential (user-pinned) + restraint/negative-space raise (
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance.
 -->
 
-{@render children()}
+<div class="page-center">
+  {@render children()}
+</div>
+
+<style>
+  .page-center {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-3) var(--space-2);
+  }
+</style>

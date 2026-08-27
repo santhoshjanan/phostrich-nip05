@@ -42,18 +42,25 @@
 </script>
 
 <CredentialCard title="Claim your identifier">
-  <label for="name">Identifier name</label>
-  <input id="name" bind:value={name} oninput={handleInput} placeholder="alice" />
+  <label for="name" class="ledger-label">Identifier name</label>
+  <input id="name" class="identifier-input" bind:value={name} oninput={handleInput} placeholder="alice" />
 
-  {#if availability === 'checking'}
-    <p class="status">checking…</p>
-  {:else if availability === 'available'}
-    <p class="status status--available">available</p>
-  {:else if availability === 'unavailable'}
-    <p class="status status--unavailable">not available</p>
+  {#if availability !== 'idle'}
+    <div class="ledger-row">
+      <span class="ledger-label">Status</span>
+      {#if availability === 'checking'}
+        <span class="ledger-value status">checking…</span>
+      {:else if availability === 'available'}
+        <span class="ledger-value status status--available">available</span>
+      {:else if availability === 'unavailable'}
+        <span class="ledger-value status status--unavailable">not available</span>
+      {/if}
+    </div>
   {/if}
 
-  <button onclick={openModal} disabled={availability !== 'available'}>Claim this name</button>
+  <p class="claim-action">
+    <button onclick={openModal} disabled={availability !== 'available'}>Claim this name</button>
+  </p>
 
   {#if submitError}
     <p class="error" role="alert">
@@ -70,21 +77,29 @@
         activity against it.
       </p>
       <button onclick={confirmClaim}>I understand, claim this name</button>
-      <button onclick={() => (showModal = false)}>Cancel</button>
+      <button class="secondary" onclick={() => (showModal = false)}>Cancel</button>
     </div>
   </div>
 {/if}
 
 <style>
+  .identifier-input {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    margin-bottom: var(--space-2);
+  }
   .status--available {
-    color: var(--color-accent-mint);
+    color: var(--color-accent-mint-text);
   }
   .status--unavailable {
-    color: var(--color-accent-rose);
+    color: var(--color-accent-rose-text);
     text-decoration: line-through;
   }
+  .claim-action {
+    margin-top: var(--space-3);
+  }
   .error {
-    color: var(--color-accent-rose);
+    color: var(--color-accent-rose-text);
   }
   .modal {
     position: fixed;
@@ -98,5 +113,10 @@
     background: white;
     max-width: 24rem;
     padding: var(--space-4);
+    border: 1px solid var(--color-line);
+  }
+  .modal__content button {
+    margin-top: var(--space-2);
+    margin-right: var(--space-1);
   }
 </style>

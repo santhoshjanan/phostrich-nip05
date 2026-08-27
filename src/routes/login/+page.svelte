@@ -54,7 +54,7 @@
 
 <style>
   .error {
-    color: var(--color-accent-rose);
+    color: var(--color-accent-rose-text);
     font-size: 0.875rem;
   }
 </style>

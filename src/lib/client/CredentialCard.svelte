@@ -16,18 +16,18 @@
 <style>
   .credential-card {
     max-width: 28rem;
-    margin: 4rem auto;
+    width: 100%;
     background: white;
     border: 1px solid var(--color-line);
     padding: var(--space-4);
   }
 
   .credential-card__header {
-    font-family: var(--font-display);
+    font-family: var(--font-ui);
     font-weight: 600;
     font-size: 1.5rem;
     color: var(--color-ink);
-    border-bottom: 2px solid var(--color-ink);
+    border-bottom: 1px solid var(--color-line);
     padding-bottom: var(--space-2);
     margin-bottom: var(--space-3);
   }

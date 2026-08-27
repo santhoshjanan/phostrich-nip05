@@ -44,4 +44,17 @@ describe('config', () => {
     Object.assign(process.env, REQUIRED_ENV, { PUBLIC_ORIGIN: 'not-a-url' });
     await expect(import('./config?t=' + Date.now())).rejects.toThrow();
   });
+
+  it('defaults SESSION_TTL_DAYS to 30 when unset', async () => {
+    Object.assign(process.env, REQUIRED_ENV);
+    delete process.env.SESSION_TTL_DAYS;
+    const { config } = await import('./config?t=' + Date.now());
+    expect(config.SESSION_TTL_DAYS).toBe(30);
+  });
+
+  it('parses a custom SESSION_TTL_DAYS from env', async () => {
+    Object.assign(process.env, REQUIRED_ENV, { SESSION_TTL_DAYS: '7' });
+    const { config } = await import('./config?t=' + Date.now());
+    expect(config.SESSION_TTL_DAYS).toBe(7);
+  });
 });

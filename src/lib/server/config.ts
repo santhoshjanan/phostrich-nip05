@@ -9,7 +9,8 @@ const envSchema = z.object({
     .string()
     .default('')
     .transform((val) => (val.trim().length === 0 ? [] : val.split(',').map((s) => s.trim())))
-    .pipe(z.array(z.string().url()))
+    .pipe(z.array(z.string().url())),
+  SESSION_TTL_DAYS: z.coerce.number().int().positive().default(30)
 });
 
 export type Config = z.infer<typeof envSchema>;

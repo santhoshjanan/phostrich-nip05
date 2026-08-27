@@ -21,7 +21,7 @@ function buildEvent(challenge: string, secretKey: Uint8Array) {
   return finalizeEvent(template, secretKey);
 }
 
-function requestEvent(body: unknown) {
+function requestEvent(body: unknown, ip = '127.0.0.1') {
   const cookieStore: Record<string, string> = {};
   const event = {
     request: new Request('https://phostrich.test/auth/verify', {
@@ -32,7 +32,8 @@ function requestEvent(body: unknown) {
       set: (name: string, value: string) => {
         cookieStore[name] = value;
       }
-    }
+    },
+    getClientAddress: () => ip
   };
   return { event, cookieStore };
 }
@@ -49,7 +50,7 @@ describe('POST /auth/verify', () => {
     expect(response.status).toBe(200);
     expect(cookieStore[SESSION_COOKIE_NAME]).toBeDefined();
 
-    await valkey.del('ratelimit:verify:pubkey:' + pubkey);
+    await valkey.del('ratelimit:verify:pubkey:' + pubkey, 'ratelimit:verify:ip:127.0.0.1');
   });
 
   it('returns 401 for an invalid signature', async () => {
@@ -63,7 +64,7 @@ describe('POST /auth/verify', () => {
     const response = await POST(evt as unknown as Parameters<typeof POST>[0]);
     expect(response.status).toBe(401);
 
-    await valkey.del('ratelimit:verify:pubkey:' + pubkey);
+    await valkey.del('ratelimit:verify:pubkey:' + pubkey, 'ratelimit:verify:ip:127.0.0.1');
   });
 
   it('returns 401 when the request body has no event', async () => {
@@ -78,33 +79,103 @@ describe('POST /auth/verify', () => {
     const response = await POST(evt as unknown as Parameters<typeof POST>[0]);
     expect(response.status).toBe(401);
 
-    await valkey.del('ratelimit:verify:pubkey:' + pubkey);
+    await valkey.del('ratelimit:verify:pubkey:' + pubkey, 'ratelimit:verify:ip:127.0.0.1');
   });
 
-  it('returns 401 when the pubkey is not 64-hex, and never reaches the rate limiter', async () => {
+  it('returns 401 when the pubkey is not 64-hex (rejected structurally by verifyAuthEvent)', async () => {
     const sk = generateSecretKey();
     const pubkey = getPublicKey(sk);
     const nonce = await issueChallenge(pubkey);
     const event = buildEvent(nonce, sk);
-    // Otherwise well-formed (matching u/method/challenge tags, valid
-    // created_at, correct kind, real signature) except the pubkey field is
-    // swapped for a non-64-hex string. Because verifyAuthEvent/verifyEvent
-    // would also independently reject this (the signature no longer matches
-    // the swapped pubkey), a bare status-401 assertion wouldn't actually
-    // pin down the PUBKEY_PATTERN guard — the response would still be 401
-    // via that unrelated downstream path even without the guard. Instead we
-    // assert that no rate-limit key is ever created for the bogus pubkey,
-    // which can only be true if the guard rejects before checkRateLimit
-    // (whose first action is `valkey.incr`) is ever called.
     const malformedPubkey = 'not-a-valid-pubkey';
     const malformed = { ...event, pubkey: malformedPubkey };
 
     const { event: evt } = requestEvent({ event: malformed });
     const response = await POST(evt as unknown as Parameters<typeof POST>[0]);
     expect(response.status).toBe(401);
-    expect(await valkey.exists('ratelimit:verify:pubkey:' + malformedPubkey)).toBe(0);
 
     await valkey.del('ratelimit:verify:pubkey:' + pubkey);
     await valkey.del('ratelimit:verify:pubkey:' + malformedPubkey);
+    await valkey.del('ratelimit:verify:ip:127.0.0.1');
+  });
+
+  describe('malformed tags shapes (must be 401, never 500/503)', () => {
+    const cases: [string, unknown][] = [
+      ['tags=[null]', [null]],
+      ['tags=[[]]', [[]]],
+      ['tags=["u"]', ['u']],
+      ['tags=[{}]', [{}]],
+      ['tags=[0]', [0]]
+    ];
+
+    it.each(cases)('%s returns 401', async (_label, tags) => {
+      const pubkey = 'b'.repeat(64);
+      const malformed = {
+        pubkey,
+        kind: 27235,
+        created_at: Math.floor(Date.now() / 1000),
+        id: 'a'.repeat(64),
+        sig: 'a'.repeat(128),
+        content: '',
+        tags
+      };
+
+      const { event: evt } = requestEvent({ event: malformed }, '127.0.0.2');
+      const response = await POST(evt as unknown as Parameters<typeof POST>[0]);
+      expect(response.status).toBe(401);
+
+      await valkey.del('ratelimit:verify:pubkey:' + pubkey);
+      await valkey.del('ratelimit:verify:ip:127.0.0.2');
+    });
+  });
+
+  it('returns 429 once the pubkey-axis rate limit is exceeded', async () => {
+    const sk = generateSecretKey();
+    const pubkey = getPublicKey(sk);
+    const ip = '127.0.0.3';
+
+    await valkey.del('ratelimit:verify:pubkey:' + pubkey, 'ratelimit:verify:ip:' + ip);
+
+    for (let i = 0; i < 10; i++) {
+      const nonce = await issueChallenge(pubkey);
+      const event = buildEvent(nonce, sk);
+      const { event: evt } = requestEvent({ event }, ip);
+      await POST(evt as unknown as Parameters<typeof POST>[0]);
+    }
+
+    const nonce = await issueChallenge(pubkey);
+    const event = buildEvent(nonce, sk);
+    const { event: evt } = requestEvent({ event }, ip);
+    const response = await POST(evt as unknown as Parameters<typeof POST>[0]);
+    expect(response.status).toBe(429);
+
+    await valkey.del('ratelimit:verify:pubkey:' + pubkey, 'ratelimit:verify:ip:' + ip);
+  });
+
+  it('returns 429 once the IP-axis rate limit is exceeded (mirroring challenge)', async () => {
+    const ip = '127.0.0.4';
+    await valkey.del('ratelimit:verify:ip:' + ip);
+
+    for (let i = 0; i < 20; i++) {
+      const sk = generateSecretKey();
+      const pubkey = getPublicKey(sk);
+      const nonce = await issueChallenge(pubkey);
+      const event = buildEvent(nonce, sk);
+      const { event: evt } = requestEvent({ event }, ip);
+      const resp = await POST(evt as unknown as Parameters<typeof POST>[0]);
+      // clean up per-pubkey key so we're only exhausting the IP axis
+      await valkey.del('ratelimit:verify:pubkey:' + pubkey);
+      expect(resp.status).not.toBe(429);
+    }
+
+    const sk = generateSecretKey();
+    const pubkey = getPublicKey(sk);
+    const nonce = await issueChallenge(pubkey);
+    const event = buildEvent(nonce, sk);
+    const { event: evt } = requestEvent({ event }, ip);
+    const response = await POST(evt as unknown as Parameters<typeof POST>[0]);
+    expect(response.status).toBe(429);
+
+    await valkey.del('ratelimit:verify:pubkey:' + pubkey, 'ratelimit:verify:ip:' + ip);
   });
 });

@@ -19,14 +19,21 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) =>
     }
 
     const ip = getClientAddress();
-    const ipAllowed = await checkRateLimit(`ratelimit:challenge:ip:${ip}`, CHALLENGE_IP_LIMIT, WINDOW_SECONDS);
+    const ipAllowed = await checkRateLimit(
+      `ratelimit:challenge:ip:${ip}`,
+      CHALLENGE_IP_LIMIT,
+      WINDOW_SECONDS
+    );
+    if (!ipAllowed) {
+      return json({ error: 'rate limited' }, { status: 429 });
+    }
+
     const pubkeyAllowed = await checkRateLimit(
       `ratelimit:challenge:pubkey:${pubkey}`,
       CHALLENGE_PUBKEY_LIMIT,
       WINDOW_SECONDS
     );
-
-    if (!ipAllowed || !pubkeyAllowed) {
+    if (!pubkeyAllowed) {
       return json({ error: 'rate limited' }, { status: 429 });
     }
 

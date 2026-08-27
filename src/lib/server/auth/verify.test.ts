@@ -89,9 +89,7 @@ describe('verifyAuthEvent', () => {
     const pubkey = getPublicKey(sk);
     const nonce = await issueChallenge(pubkey);
 
-    expect(
-      await verifyAuthEvent(buildEvent({ challenge: nonce, method: 'GET' }, sk))
-    ).toBeNull();
+    expect(await verifyAuthEvent(buildEvent({ challenge: nonce, method: 'GET' }, sk))).toBeNull();
   });
 
   it('rejects a mismatched challenge', async () => {
@@ -116,5 +114,73 @@ describe('verifyAuthEvent', () => {
 
     expect(await verifyAuthEvent(event)).toEqual({ pubkey });
     expect(await verifyAuthEvent(event)).toBeNull();
+  });
+
+  it('rejects an event missing the challenge tag entirely (not just mismatched)', async () => {
+    const sk = generateSecretKey();
+    const pubkey = getPublicKey(sk);
+    await issueChallenge(pubkey);
+
+    const template: EventTemplate = {
+      kind: 27235,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [
+        ['u', `${config.PUBLIC_ORIGIN}/auth/verify`],
+        ['method', 'POST']
+      ],
+      content: ''
+    };
+    const event = finalizeEvent(template, sk);
+
+    expect(await verifyAuthEvent(event)).toBeNull();
+  });
+
+  it('accepts an event at exactly the 60-second freshness boundary', async () => {
+    const sk = generateSecretKey();
+    const pubkey = getPublicKey(sk);
+    const nonce = await issueChallenge(pubkey);
+    const createdAt = Math.floor(Date.now() / 1000) - 60;
+
+    const result = await verifyAuthEvent(buildEvent({ challenge: nonce, createdAt }, sk));
+    expect(result).toEqual({ pubkey });
+  });
+
+  it('rejects an event at 61 seconds, just past the freshness boundary', async () => {
+    const sk = generateSecretKey();
+    const pubkey = getPublicKey(sk);
+    const nonce = await issueChallenge(pubkey);
+    const createdAt = Math.floor(Date.now() / 1000) - 61;
+
+    expect(await verifyAuthEvent(buildEvent({ challenge: nonce, createdAt }, sk))).toBeNull();
+  });
+
+  describe('malformed event shapes', () => {
+    const basePubkey = 'a'.repeat(64);
+
+    it.each([
+      ['tags is [null]', { tags: [null] }],
+      ['tags is [[]]', { tags: [[]] }],
+      ['tags is ["u"]', { tags: ['u'] }],
+      ['tags is [{}]', { tags: [{}] }],
+      ['tags is [0]', { tags: [0] }]
+    ])('returns null (not throwing) when %s', async (_label, override) => {
+      const malformed = {
+        kind: 27235,
+        created_at: Math.floor(Date.now() / 1000),
+        pubkey: basePubkey,
+        id: 'a'.repeat(64),
+        sig: 'a'.repeat(128),
+        content: '',
+        ...override
+      };
+
+      await expect(verifyAuthEvent(malformed)).resolves.toBeNull();
+    });
+
+    it('returns null for a completely non-object value', async () => {
+      await expect(verifyAuthEvent(null)).resolves.toBeNull();
+      await expect(verifyAuthEvent('not an event')).resolves.toBeNull();
+      await expect(verifyAuthEvent(42)).resolves.toBeNull();
+    });
   });
 });

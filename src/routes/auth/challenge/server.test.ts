@@ -49,4 +49,25 @@ describe('POST /auth/challenge', () => {
     expect(response.status).toBe(429);
     await resetRateLimits(pubkey);
   });
+
+  it('returns 429 once the per-IP rate limit is exceeded, short-circuiting before the pubkey axis', async () => {
+    const ip = '10.0.0.9';
+    await valkey.del(`ratelimit:challenge:ip:${ip}`);
+    for (let i = 0; i < 20; i++) {
+      const pubkey = ('0'.repeat(63) + i.toString(16)).slice(-64);
+      const response = await POST(requestEvent({ pubkey }, ip));
+      expect(response.status).not.toBe(429);
+      await valkey.del(`ratelimit:challenge:pubkey:${pubkey}`);
+    }
+
+    const victimPubkey = '9'.repeat(64);
+    await valkey.del(`ratelimit:challenge:pubkey:${victimPubkey}`);
+    const response = await POST(requestEvent({ pubkey: victimPubkey }, ip));
+    expect(response.status).toBe(429);
+    // The IP axis was already blocked, so the pubkey axis must never have
+    // been consulted for this victim pubkey.
+    expect(await valkey.exists(`ratelimit:challenge:pubkey:${victimPubkey}`)).toBe(0);
+
+    await valkey.del(`ratelimit:challenge:ip:${ip}`, `ratelimit:challenge:pubkey:${victimPubkey}`);
+  });
 });

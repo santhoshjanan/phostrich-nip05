@@ -19,7 +19,6 @@ describe('buildAuthEventTemplate', () => {
 describe('signInWithExtension', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-    // @ts-expect-error test cleanup
     delete window.nostr;
   });
 
@@ -28,15 +27,22 @@ describe('signInWithExtension', () => {
   });
 
   it('requests a challenge, signs it, and posts it to /auth/verify', async () => {
-    const fakeEvent = { id: 'x', kind: 27235, pubkey: 'p'.repeat(64), sig: 's'.repeat(128) };
-    // @ts-expect-error test double
+    const fakeEvent = {
+      id: 'x',
+      kind: 27235,
+      pubkey: 'p'.repeat(64),
+      sig: 's'.repeat(128),
+      tags: [],
+      content: '',
+      created_at: 0
+    };
     window.nostr = {
       getPublicKey: async () => 'p'.repeat(64),
       signEvent: async () => fakeEvent
     };
 
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const url = String(args[0]);
       if (url.includes('/auth/challenge')) {
         return new Response(JSON.stringify({ challenge: 'the-nonce' }), { status: 200 });
       }

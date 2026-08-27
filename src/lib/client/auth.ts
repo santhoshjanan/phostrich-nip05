@@ -67,7 +67,7 @@ export async function signInWithBunker(uri: string): Promise<void> {
   }
 
   const clientSecretKey = generateSecretKey();
-  const signer = new BunkerSigner(clientSecretKey, pointer);
+  const signer = BunkerSigner.fromBunker(clientSecretKey, pointer);
 
   await withTimeout(signer.connect(), 'Connection to your signer timed out.');
   const pubkey = await withTimeout(signer.getPublicKey(), 'Connection to your signer timed out.');

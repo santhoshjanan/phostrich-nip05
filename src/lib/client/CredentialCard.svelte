@@ -1,5 +1,9 @@
 <script lang="ts">
-  let { title, children } = $props<{ title: string; children: import('svelte').Snippet }>();
+  interface Props {
+    title: string;
+    children: import('svelte').Snippet;
+  }
+  let { title, children }: Props = $props();
 </script>
 
 <div class="credential-card">

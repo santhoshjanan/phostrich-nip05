@@ -6,6 +6,7 @@ export default defineConfig({
   test: {
     setupFiles: ['./vitest-setup.ts'],
     include: ['src/**/*.test.ts', 'scripts/**/*.test.ts'],
+    environmentMatchGlobs: [['src/lib/client/**', 'happy-dom']],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
@@ -15,7 +16,10 @@ export default defineConfig({
       // every other default exclusion (test files, config files, etc.),
       // just drop that one pattern.
       include: ['src/**/*.ts', 'scripts/**/*.ts'],
-      exclude: coverageConfigDefaults.exclude.filter((pattern) => pattern !== '**/[.]**'),
+      exclude: [
+        ...coverageConfigDefaults.exclude.filter((pattern) => pattern !== '**/[.]**'),
+        '**/*.svelte'
+      ],
       thresholds: {
         lines: 90,
         functions: 90,

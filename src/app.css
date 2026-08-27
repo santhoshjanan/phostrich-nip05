@@ -1,0 +1,32 @@
+@import '@fontsource/source-serif-4/400.css';
+@import '@fontsource/source-serif-4/600.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+
+:root {
+  --color-canvas: #f5f3f8;      /* pale lavender-white ledger ground */
+  --color-ink: #2e2a33;         /* soft charcoal-plum body text */
+  --color-line: #cfc9d6;        /* hairline rule / border */
+  --color-accent-mint: #a8d8c9; /* available / success — sage-mint */
+  --color-accent-rose: #e8b4bc; /* unavailable / void — dusty rose */
+
+  --font-display: 'Source Serif 4', serif;   /* identifier name only */
+  --font-mono: 'JetBrains Mono', monospace;  /* pubkeys/timestamps/technical only */
+  --font-ui: -apple-system, 'Segoe UI', system-ui, sans-serif; /* buttons/labels/body */
+
+  --space-1: 0.5rem;
+  --space-2: 1rem;
+  --space-3: 1.5rem;
+  --space-4: 2.5rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+}

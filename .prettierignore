@@ -1,0 +1,9 @@
+pnpm-lock.yaml
+drizzle/
+build/
+.svelte-kit/
+coverage/
+node_modules/
+docs/
+.superpowers/
+PRODUCT.md

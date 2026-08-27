@@ -1,4 +1,12 @@
-import { bigserial, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+  bigserial,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex
+} from 'drizzle-orm/pg-core';
 
 export const identifierStatus = pgEnum('identifier_status', ['claimed', 'reserved', 'blocked']);
 
@@ -11,7 +19,9 @@ export const identifiers = pgTable(
     ownerPubkey: text('owner_pubkey'),
     relays: jsonb('relays').$type<string[]>().notNull().default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    lastIdentifiedAt: timestamp('last_identified_at', { withTimezone: true }).notNull().defaultNow(),
+    lastIdentifiedAt: timestamp('last_identified_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({

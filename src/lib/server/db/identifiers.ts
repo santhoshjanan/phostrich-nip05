@@ -28,7 +28,13 @@ export async function resolveIdentifier(name: string): Promise<ResolvedIdentifie
     return null;
   }
   if (cached !== null) {
-    return JSON.parse(cached) as ResolvedIdentifier;
+    try {
+      return JSON.parse(cached) as ResolvedIdentifier;
+    } catch {
+      // a poisoned/corrupt cache value must be treated as a cache miss,
+      // not a thrown error — this endpoint always returns 200
+      cached = null;
+    }
   }
 
   const [row] = await db
@@ -55,7 +61,12 @@ export async function resolveIdentifier(name: string): Promise<ResolvedIdentifie
       await db
         .update(identifiers)
         .set({ lastIdentifiedAt: new Date() })
-        .where(and(eq(identifiers.name, name), lt(identifiers.lastIdentifiedAt, new Date(Date.now() - STALE_AFTER_MS))));
+        .where(
+          and(
+            eq(identifiers.name, name),
+            lt(identifiers.lastIdentifiedAt, new Date(Date.now() - STALE_AFTER_MS))
+          )
+        );
     } catch {
       // best-effort side effect on an otherwise-successful read; a flaky
       // write here must never sour an otherwise-good read (see cacheSet)

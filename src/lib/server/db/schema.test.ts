@@ -26,9 +26,13 @@ describe('identifiers schema', () => {
   });
 
   it('rejects a second row with the same name', async () => {
-    await db.insert(identifiers).values({ name: TEST_NAME, status: 'claimed', ownerPubkey: 'a'.repeat(64) });
+    await db
+      .insert(identifiers)
+      .values({ name: TEST_NAME, status: 'claimed', ownerPubkey: 'a'.repeat(64) });
     await expect(
-      db.insert(identifiers).values({ name: TEST_NAME, status: 'claimed', ownerPubkey: 'b'.repeat(64) })
+      db
+        .insert(identifiers)
+        .values({ name: TEST_NAME, status: 'claimed', ownerPubkey: 'b'.repeat(64) })
     ).rejects.toThrow();
   });
 });

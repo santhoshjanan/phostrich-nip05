@@ -17,5 +17,17 @@ The NIP-05 endpoint is then available at:
 
 ## Testing
 
-    pnpm test              # watch mode
-    pnpm test:coverage      # single run with the 90% coverage gate
+`docker compose up -d` (Postgres + Valkey) must be running before `pnpm test`.
+
+    pnpm test           # watch mode
+    pnpm test:coverage  # single run with the 90% coverage gate
+
+Running the test suite clears the seeded fixture rows (they share names with the dev seed
+data) — re-run `pnpm db:seed` afterward if you need them back for manual testing.
+
+## Other commands
+
+    pnpm check        # svelte-check + TypeScript
+    pnpm lint          # eslint
+    pnpm format:check  # prettier --check
+    pnpm build          # production build

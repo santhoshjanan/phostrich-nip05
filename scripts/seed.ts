@@ -3,9 +3,19 @@ import { db } from '../src/lib/server/db';
 import { identifiers } from '../src/lib/server/db/schema';
 
 export const FIXTURES = [
-  { name: 'alice', status: 'claimed' as const, ownerPubkey: 'a'.repeat(64), relays: ['wss://relay.damus.io'] },
+  {
+    name: 'alice',
+    status: 'claimed' as const,
+    ownerPubkey: 'a'.repeat(64),
+    relays: ['wss://relay.damus.io']
+  },
   { name: 'bob', status: 'claimed' as const, ownerPubkey: 'b'.repeat(64), relays: [] as string[] },
-  { name: '_', status: 'claimed' as const, ownerPubkey: 'c'.repeat(64), relays: ['wss://relay.phostrich.com'] }
+  {
+    name: '_',
+    status: 'claimed' as const,
+    ownerPubkey: 'c'.repeat(64),
+    relays: ['wss://relay.phostrich.com']
+  }
 ];
 
 export async function seed(): Promise<void> {

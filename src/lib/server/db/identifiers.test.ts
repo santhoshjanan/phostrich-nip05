@@ -54,7 +54,10 @@ describe('resolveIdentifier', () => {
     });
     await resolveIdentifier(TEST_NAME); // populates cache
 
-    await db.update(identifiers).set({ ownerPubkey: 'e'.repeat(64) }).where(eq(identifiers.name, TEST_NAME));
+    await db
+      .update(identifiers)
+      .set({ ownerPubkey: 'e'.repeat(64) })
+      .where(eq(identifiers.name, TEST_NAME));
 
     const result = await resolveIdentifier(TEST_NAME);
     expect(result?.pubkey).toBe(TEST_PUBKEY); // still the cached value
@@ -145,6 +148,19 @@ describe('resolveIdentifier', () => {
     } finally {
       getSpy.mockRestore();
     }
+  });
+
+  it('falls back to Postgres when the cached value is corrupt JSON', async () => {
+    await db.insert(identifiers).values({
+      name: TEST_NAME,
+      status: 'claimed',
+      ownerPubkey: TEST_PUBKEY,
+      relays: ['wss://relay.example']
+    });
+    await valkey.set('identifier:' + TEST_NAME, 'not-json', 'EX', 60);
+
+    const result = await resolveIdentifier(TEST_NAME);
+    expect(result).toEqual({ pubkey: TEST_PUBKEY, relays: ['wss://relay.example'] });
   });
 
   it('returns null from the negative cache on a repeated miss', async () => {

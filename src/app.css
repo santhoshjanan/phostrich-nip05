@@ -33,6 +33,25 @@ body {
   background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-ui);
+  caret-color: var(--color-ink);
+}
+
+/* Browser surfaces themed off the ledger palette rather than left at UA defaults. */
+::selection {
+  background: var(--color-line);
+  color: var(--color-ink);
+}
+
+a {
+  color: var(--color-ink);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--color-accent-mint);
+  outline-offset: 2px;
 }
 
 /* Ledger serial-label rows (fix 1) */

@@ -2,32 +2,51 @@
 
 A NIP-05 identifier provider. See `docs/SPEC.md` for the full product/architecture spec.
 
-## Local development
+## Prerequisites
 
+- **Node 24 LTS**
+- **pnpm 10** — `corepack enable` exposes the version pinned in `package.json` (`packageManager`); no separate install.
+- **Docker** with Compose v2 (`docker compose …`) — runs Postgres 16 and Valkey 8 for local dev and tests.
+
+## Install & run
+
+    corepack enable
     cp .env.example .env
-    docker compose up -d
+    docker compose up -d            # Postgres :5432, Valkey :6379
     pnpm install
-    pnpm db:migrate
-    pnpm db:seed
-    pnpm dev
+    pnpm db:migrate                 # apply the schema
+    pnpm db:seed                    # optional: demo identifiers + reservations
+    pnpm dev                        # http://localhost:5173
 
-The NIP-05 endpoint is then available at:
+Verify:
 
     curl "http://localhost:5173/.well-known/nostr.json?name=alice"
 
+`.env` (copied from `.env.example`) must define `DATABASE_URL`, `VALKEY_URL`,
+`PUBLIC_ORIGIN`, `SESSION_TTL_DAYS`, `DEFAULT_RELAYS`, and `ADMIN_PUBKEYS` —
+`src/lib/server/config.ts` validates all of them at boot and the process exits on
+a missing or malformed value (`ADMIN_PUBKEYS` may be empty). The example values
+target the local `docker compose` stack; leave them as-is for development. The
+production shape is different — see [Production deployment](#production-deployment).
+
 ## Testing
 
-`docker compose up -d` (Postgres + Valkey) must be running before `pnpm test`.
+Postgres + Valkey must be up (`docker compose up -d`) with migrations applied.
 
-    pnpm test           # watch mode
-    pnpm test:coverage  # single run with the 90% coverage gate
+    pnpm check           # svelte-check + tsc
+    pnpm lint            # eslint
+    pnpm test            # vitest, watch mode
+    pnpm test:coverage   # vitest single run, 90% coverage gate
 
-Running the test suite clears the seeded fixture rows (they share names with the dev seed
-data) — re-run `pnpm db:seed` afterward if you need them back for manual testing.
+    pnpm exec playwright install --with-deps chromium   # once
+    pnpm build && pnpm test:e2e                         # e2e runs against `pnpm preview` of the build
+
+`pnpm test:coverage` clears the seeded fixture rows (they share names with the dev
+seed data) — re-run `pnpm db:seed` afterward if you need them back for manual testing.
 
 ## Auth
 
-Backend-only in this slice — no login UI yet. The flow:
+`/login` drives this from the browser (NIP-07 extension or NIP-46 bunker). The underlying HTTP flow:
 
     POST /auth/challenge {"pubkey": "<64-hex>"}   -> {"challenge": "<nonce>"}
     # client signs a kind 27235 event: tags u=<origin>/auth/verify, method=POST, challenge=<nonce>
@@ -50,7 +69,7 @@ deploying behind a proxy.
 - `/claim` — pick an available identifier name; a 6-month inactivity policy is shown before the claim is confirmed.
 - `/claimed` — the issued identifier, with a copy button.
 
-New env for e2e only: `PUBLIC_ORIGIN` must match wherever `pnpm preview` actually serves (default `http://localhost:4173`), since the client's signed auth event and the server's check of it both depend on this value matching exactly.
+`PUBLIC_ORIGIN` must exactly match the origin the app is served from — the client's signed auth event and the server's check of it both depend on it. Dev uses `http://localhost:5173`; the e2e run overrides it to `http://localhost:4173` (where `pnpm preview` serves) via `playwright.config.ts`.
 
 ## Account management
 
@@ -86,7 +105,6 @@ header on it. Deployment is manual for v1 — no CI step deploys automatically y
 
 ## Other commands
 
-    pnpm check        # svelte-check + TypeScript
-    pnpm lint          # eslint
     pnpm format:check  # prettier --check
-    pnpm build          # production build
+    pnpm build          # production build (@sveltejs/adapter-node)
+    pnpm db:generate    # generate a migration after editing src/lib/server/db/schema.ts

@@ -2,13 +2,16 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { eq, inArray } from 'drizzle-orm';
 import { db } from '../db';
 import { identifierEvents, identifiers } from '../db/schema';
-import { createAdminReservation } from './adminReservations';
+import { createAdminReservation, removeAdminReservation } from './adminReservations';
 
 const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
 const CREATE_NAME = 'admin-reservation-create';
 const CLAIMED_NAME = 'admin-reservation-claimed';
 const CLAIMED_OWNER = '5201000000000000000000000000000000000000000000000000000000000000';
-const FIXTURE_NAMES = [CREATE_NAME, CLAIMED_NAME];
+const REMOVE_NAME = 'admin-service-reservation-remove';
+const REMOVE_CLAIMED_NAME = 'admin-service-reservation-remove-claimed';
+const REMOVE_OWNER = '5203000000000000000000000000000000000000000000000000000000000000';
+const FIXTURE_NAMES = [CREATE_NAME, CLAIMED_NAME, REMOVE_NAME, REMOVE_CLAIMED_NAME];
 
 describe('admin reservation service', () => {
   afterEach(async () => {
@@ -76,6 +79,54 @@ describe('admin reservation service', () => {
     await expect(createAdminReservation(ADMIN_PUBKEY, CREATE_NAME, 'reason')).resolves.toEqual({
       ok: false,
       reason: 'name_already_reserved'
+    });
+  });
+
+  it('does not remove or audit a claimed row', async () => {
+    await db.insert(identifiers).values({
+      name: REMOVE_CLAIMED_NAME,
+      status: 'claimed',
+      ownerPubkey: REMOVE_OWNER
+    });
+
+    await expect(removeAdminReservation(ADMIN_PUBKEY, REMOVE_CLAIMED_NAME)).resolves.toEqual({
+      ok: false,
+      reason: 'not_found'
+    });
+    expect(
+      await db.select().from(identifiers).where(eq(identifiers.name, REMOVE_CLAIMED_NAME))
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(identifierEvents)
+        .where(eq(identifierEvents.identifierName, REMOVE_CLAIMED_NAME))
+    ).toHaveLength(0);
+  });
+
+  it('removes a reserved row and writes exactly one audit event', async () => {
+    await db.insert(identifiers).values({
+      name: REMOVE_NAME,
+      status: 'reserved',
+      ownerPubkey: null
+    });
+
+    await expect(removeAdminReservation(ADMIN_PUBKEY, REMOVE_NAME)).resolves.toEqual({
+      ok: true,
+      name: REMOVE_NAME
+    });
+    expect(
+      await db.select().from(identifiers).where(eq(identifiers.name, REMOVE_NAME))
+    ).toHaveLength(0);
+    const events = await db
+      .select()
+      .from(identifierEvents)
+      .where(eq(identifierEvents.identifierName, REMOVE_NAME));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      eventType: 'reservation_removed',
+      actorPubkey: ADMIN_PUBKEY,
+      reason: null
     });
   });
 });

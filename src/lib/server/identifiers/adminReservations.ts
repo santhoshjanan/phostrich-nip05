@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../db';
 import { identifierEvents, identifiers } from '../db/schema';
 import { isValidNameFormat } from './reservedPatterns';
@@ -9,6 +9,9 @@ export type CreateAdminReservationResult =
       ok: false;
       reason: 'invalid_name' | 'reason_required' | 'name_claimed' | 'name_already_reserved';
     };
+
+export type RemoveAdminReservationResult =
+  { ok: true; name: string } | { ok: false; reason: 'not_found' };
 
 export async function createAdminReservation(
   actorPubkey: string,
@@ -56,4 +59,30 @@ export async function createAdminReservation(
       reason: existing?.status === 'claimed' ? 'name_claimed' : 'name_already_reserved'
     };
   }
+}
+
+export async function removeAdminReservation(
+  actorPubkey: string,
+  name: string
+): Promise<RemoveAdminReservationResult> {
+  const deletedName = await db.transaction(async (tx) => {
+    const [deleted] = await tx
+      .delete(identifiers)
+      .where(and(eq(identifiers.name, name), eq(identifiers.status, 'reserved')))
+      .returning({ name: identifiers.name });
+    if (!deleted) return null;
+
+    await tx.insert(identifierEvents).values({
+      identifierName: deleted.name,
+      eventType: 'reservation_removed',
+      actorPubkey,
+      reason: null
+    });
+
+    return deleted.name;
+  });
+
+  return deletedName === null
+    ? { ok: false, reason: 'not_found' }
+    : { ok: true, name: deletedName };
 }

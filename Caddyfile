@@ -1,5 +1,0 @@
-# Caddy passes response headers through unchanged by default, so the app's own
-# Access-Control-Allow-Origin header on /.well-known/nostr.json survives untouched.
-{$PUBLIC_ORIGIN} {
-	reverse_proxy app:3000
-}

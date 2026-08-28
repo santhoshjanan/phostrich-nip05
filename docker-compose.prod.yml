@@ -10,6 +10,12 @@ services:
       DEFAULT_RELAYS: ${DEFAULT_RELAYS}
       SESSION_TTL_DAYS: ${SESSION_TTL_DAYS}
       ADMIN_PUBKEYS: ${ADMIN_PUBKEYS}
+    # No published ports: the app listens on 3000 inside the compose network and
+    # expects an external reverse proxy (Traefik, etc.) to terminate TLS and
+    # route to it. The proxy must pass /.well-known/nostr.json through untouched
+    # — no redirect, and keep the app's Access-Control-Allow-Origin header.
+    expose:
+      - '3000'
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -54,21 +60,5 @@ services:
     image: valkey/valkey:8-alpine
     restart: unless-stopped
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - '80:80'
-      - '443:443'
-    environment:
-      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy-data:/data
-    depends_on:
-      app:
-        condition: service_healthy
-
 volumes:
   postgres-data:
-  caddy-data:

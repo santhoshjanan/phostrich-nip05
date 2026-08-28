@@ -75,9 +75,14 @@ Every push and PR runs three GitHub Actions jobs: `lint-and-check`, `test` (full
 
 `DATABASE_URL` and `VALKEY_URL` must point at the compose service names — e.g.
 `postgres://phostrich:$POSTGRES_PASSWORD@postgres:5432/phostrich` and
-`redis://valkey:6379`. Postgres and Valkey are not exposed outside the compose
-network. Caddy handles TLS automatically for the domain in `PUBLIC_ORIGIN`.
-Deployment is manual for v1 — no CI step deploys automatically yet.
+`redis://valkey:6379`. `PUBLIC_ORIGIN` is the external origin only (scheme + host,
+no port). Postgres and Valkey are not exposed outside the compose network.
+
+The stack does not include a reverse proxy. The `app` service listens on port
+`3000` inside the compose network and expects an external proxy to terminate TLS
+and route to it. That proxy must **not** rewrite or redirect
+`/.well-known/nostr.json`, and must preserve the app's `Access-Control-Allow-Origin`
+header on it. Deployment is manual for v1 — no CI step deploys automatically yet.
 
 ## Other commands
 

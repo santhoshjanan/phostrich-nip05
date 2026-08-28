@@ -615,8 +615,8 @@ import { identifierEvents, identifiers } from '../db/schema';
 import { createAdminReservation } from './adminReservations';
 
 const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
-const CREATE_NAME = 'admin-service-reservation-create';
-const CLAIMED_NAME = 'admin-service-reservation-claimed';
+const CREATE_NAME = 'admin-reservation-create';
+const CLAIMED_NAME = 'admin-reservation-claimed';
 const CLAIMED_OWNER = '5201000000000000000000000000000000000000000000000000000000000000';
 const FIXTURE_NAMES = [CREATE_NAME, CLAIMED_NAME];
 

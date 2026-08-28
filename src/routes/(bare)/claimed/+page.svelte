@@ -72,7 +72,7 @@
   }
   .issued-row {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: var(--space-2);
   }
@@ -90,10 +90,17 @@
   .next-actions {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-4);
     border-top: 1px solid var(--color-line);
     margin-top: var(--space-3);
     padding-top: var(--space-3);
+  }
+  @media (max-width: 30rem) {
+    .next-actions {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: var(--space-2);
+    }
   }
   .go-account {
     display: inline-block;

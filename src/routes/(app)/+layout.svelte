@@ -5,7 +5,10 @@
 
   let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
 
-  const shortPubkey = $derived(`${data.pubkey.slice(0, 6)}…${data.pubkey.slice(-4)}`);
+  const shortPubkey = $derived(`${data.pubkey.slice(0, 6)}…${data.pubkey.slice(-6)}`);
+
+  // /admin is the wide exception; every other authed route uses the narrow column.
+  const wide = $derived(page.url.pathname === '/admin');
 
   let signingOut = $state(false);
 
@@ -14,10 +17,12 @@
     signingOut = true;
     try {
       await fetch('/auth/logout', { method: 'POST' });
-      await goto('/login', { invalidateAll: true });
-    } finally {
-      signingOut = false;
+    } catch {
+      // Network error — the session may still be live. Head to /login anyway;
+      // hooks.server bounces back here if it survived.
     }
+    await goto('/login', { invalidateAll: true });
+    signingOut = false;
   }
 
   function current(path: string): 'page' | undefined {
@@ -27,7 +32,7 @@
 
 <div class="app-frame">
   <header class="masthead">
-    <div class="masthead__inner">
+    <div class="masthead__inner" class:masthead__inner--wide={wide}>
       <a class="wordmark" href="/account">Phostrich</a>
 
       <nav class="primary" aria-label="Primary">
@@ -49,7 +54,7 @@
     </div>
   </header>
 
-  <main class="app-main">
+  <main class="app-main" class:app-main--wide={wide}>
     {@render children()}
   </main>
 </div>
@@ -70,10 +75,13 @@
     align-items: baseline;
     flex-wrap: wrap;
     gap: var(--space-2) var(--space-3);
-    max-width: 64rem;
+    max-width: 42rem;
     margin: 0 auto;
     width: 100%;
     padding: var(--space-2) var(--space-3);
+  }
+  .masthead__inner--wide {
+    max-width: 64rem;
   }
 
   .wordmark {
@@ -114,6 +122,11 @@
       border-color 0.15s ease;
   }
 
+  /* Lift primary nav to full ink so it outranks the muted identity cluster. */
+  .primary a {
+    color: var(--color-ink);
+  }
+
   .primary a:hover,
   .signout:hover:not(:disabled) {
     color: var(--color-ink);
@@ -123,6 +136,12 @@
   .primary a[aria-current='page'] {
     color: var(--color-ink);
     border-bottom-color: var(--color-ink);
+  }
+
+  .wordmark:focus-visible,
+  .primary a:focus-visible,
+  .signout:focus-visible {
+    outline-offset: 1px;
   }
 
   .signout:disabled {
@@ -155,12 +174,17 @@
     color: var(--color-ink-muted);
   }
 
+  /* Shared column: content is top-aligned and its left edge lines up with the
+     masthead wordmark. /admin widens to match its table-scale card. */
   .app-main {
     flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-3) var(--space-2);
+    width: 100%;
+    max-width: 42rem;
+    margin: 0 auto;
+    padding: var(--space-4) var(--space-3) var(--space-3);
+  }
+  .app-main--wide {
+    max-width: 64rem;
   }
 
   @media (max-width: 34rem) {

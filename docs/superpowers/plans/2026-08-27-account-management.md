@@ -547,12 +547,15 @@ git commit -m "feat: add /account load guard"
 // src/lib/client/accountForm.test.ts
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { eligibleForReleaseDate, releaseIdentifier, saveRelays } from './accountForm';
+import { eligibleForReleaseDate, parseRelayError, releaseIdentifier, saveRelays } from './accountForm';
 
 describe('eligibleForReleaseDate', () => {
   it('uses PostgreSQL-compatible month-end clamping', () => {
     expect(eligibleForReleaseDate('2026-08-31T00:00:00.000Z').toISOString()).toBe(
       '2027-02-28T00:00:00.000Z'
+    );
+    expect(eligibleForReleaseDate('2027-08-31T00:00:00.000Z').toISOString()).toBe(
+      '2028-02-29T00:00:00.000Z'
     );
   });
 });
@@ -575,6 +578,13 @@ describe('saveRelays', () => {
     expect(await saveRelays(['bad'])).toEqual({ ok: false, error: 'relay 1: not a valid URL' });
     vi.unstubAllGlobals();
   });
+
+  it('returns safe results for a rejected fetch and failed non-JSON response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('network'))));
+    await expect(saveRelays([])).resolves.toEqual({ ok: false, error: 'Could not reach the server. Check your connection and try again.' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('gateway failure', { status: 502 })));
+    await expect(saveRelays([])).resolves.toEqual({ ok: false, error: 'We could not save your relays. Please try again.' });
+  });
 });
 
 describe('releaseIdentifier', () => {
@@ -586,6 +596,14 @@ describe('releaseIdentifier', () => {
     expect(await releaseIdentifier()).toEqual({ ok: true });
     vi.unstubAllGlobals();
   });
+  it('returns a safe result for a rejected release request', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('network'))));
+    await expect(releaseIdentifier()).resolves.toEqual({ ok: false, error: 'Could not reach the server. Check your connection and try again.' });
+  });
+});
+
+it('maps a one-based indexed relay error to its zero-based row', () => {
+  expect(parseRelayError('relay 2: must start with wss://')).toEqual({ index: 1, message: 'must start with wss://' });
 });
 ```
 
@@ -604,6 +622,16 @@ const RELEASE_ERROR = 'We could not release this identifier. Please try again.';
 
 function hasError(body: unknown): body is { error: string } {
   return typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string';
+}
+
+export function parseRelayError(error: string): { index: number; message: string } | null {
+  const match = /^relay (\d+):\s*(.+)$/i.exec(error);
+  if (!match) return null;
+  const relayNumber = Number(match[1]);
+  const message = match[2].trim();
+  return Number.isSafeInteger(relayNumber) && relayNumber >= 1 && message
+    ? { index: relayNumber - 1, message }
+    : null;
 }
 
 export async function saveRelays(
@@ -640,9 +668,10 @@ export async function releaseIdentifier(): Promise<{ ok: true } | { ok: false; e
 
 export function eligibleForReleaseDate(lastIdentifiedAtIso: string): Date {
   const date = new Date(lastIdentifiedAtIso);
-  // Future correction: implement PostgreSQL-compatible month-end clamping, not JS overflow.
-  // August 31 + six months must return February 28; add a leap-year boundary test too.
-  return addSixCalendarMonthsWithPostgresClamping(date);
+  const targetYear = date.getUTCFullYear() + Math.floor((date.getUTCMonth() + 6) / 12);
+  const targetMonth = (date.getUTCMonth() + 6) % 12;
+  const lastTargetDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(targetYear, targetMonth, Math.min(date.getUTCDate(), lastTargetDay), date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds(), date.getUTCMilliseconds()));
 }
 ```
 

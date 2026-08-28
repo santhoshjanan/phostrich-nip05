@@ -406,9 +406,9 @@ git commit -m "refactor: split isClaimableName into isValidNameFormat plus block
 
 **Interfaces:**
 - Consumes: `db`, `identifiers`, `identifierEvents` (`../db`, `../db/schema`)
-- Produces: `staleIdentifierCondition()` (the single PostgreSQL `last_identified_at + interval '6 months' < now()` condition), `getStaleIdentifiers(): Promise<StaleIdentifier[]>`, and `getReservations(): Promise<Reservation[]>` from `src/lib/server/identifiers/adminQueries.ts`
+- Produces: `staleIdentifierCondition(referenceTime: Date | SQL = sql\`now()\`)` (the single PostgreSQL addition condition) and `getStaleIdentifiers(referenceTime?: Date | SQL)`, so fixed-reference tests and production's default `now()` share one implementation.
 
-Tests must use literal shared-condition boundaries: an identifier with `last_identified_at = '2026-08-31T00:00:00Z'` is not eligible at `now() = '2027-02-28T00:00:00Z'` and is eligible just after it; include a leap-year case too. Both report and force-release consume this one condition.
+Tests use fixed references, never `Date.now()`: with `last_identified_at = '2026-08-31T00:00:00Z'`, it is included just before eligibility (`2027-02-28T00:00:00.001Z`), excluded at exact eligibility (`2027-02-28T00:00:00Z`) and just after; repeat Aug 31 → Feb 29 for the 2028 leap year. Both report and force release use the default `now()` helper in production.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -430,27 +430,27 @@ describe('getStaleIdentifiers', () => {
     await db.delete(identifiers).where(eq(identifiers.name, FRESH_NAME));
   });
 
-  it('returns only claimed identifiers older than 6 months, sorted oldest-first', async () => {
-    const sevenMonthsAgo = new Date(Date.now() - 7 * 30 * 24 * 60 * 60 * 1000);
-    const oneMonthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  it('uses strict fixed-reference addition boundaries, including month-end and leap-year clamping', async () => {
+    const august31 = new Date('2026-08-31T00:00:00.000Z');
+    const leapAugust31 = new Date('2027-08-31T00:00:00.000Z');
 
     await db.insert(identifiers).values({
       name: STALE_NAME,
       status: 'claimed',
       ownerPubkey: 'a'.repeat(64),
-      lastIdentifiedAt: sevenMonthsAgo
+      lastIdentifiedAt: august31
     });
     await db.insert(identifiers).values({
       name: FRESH_NAME,
       status: 'claimed',
       ownerPubkey: 'b'.repeat(64),
-      lastIdentifiedAt: oneMonthAgo
+      lastIdentifiedAt: leapAugust31
     });
 
-    const result = await getStaleIdentifiers();
-    const names = result.map((r) => r.name);
-    expect(names).toContain(STALE_NAME);
-    expect(names).not.toContain(FRESH_NAME);
+    expect((await getStaleIdentifiers(new Date('2027-02-28T00:00:00.001Z'))).map((row) => row.name)).toContain(STALE_NAME);
+    expect((await getStaleIdentifiers(new Date('2027-02-28T00:00:00.000Z'))).map((row) => row.name)).not.toContain(STALE_NAME);
+    expect((await getStaleIdentifiers(new Date('2027-02-28T00:00:00.000Z'))).map((row) => row.name)).not.toContain(FRESH_NAME);
+    expect((await getStaleIdentifiers(new Date('2028-02-29T00:00:00.001Z'))).map((row) => row.name)).toContain(FRESH_NAME);
   });
 });
 
@@ -487,12 +487,12 @@ Expected: FAIL — `./adminQueries` does not exist.
 
 ```ts
 // src/lib/server/identifiers/adminQueries.ts
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db';
 import { identifierEvents, identifiers } from '../db/schema';
 
-export function staleIdentifierCondition() {
-  return sql`${identifiers.lastIdentifiedAt} + interval '6 months' < now()`;
+export function staleIdentifierCondition(referenceTime: Date | SQL = sql`now()`) {
+  return sql`${identifiers.lastIdentifiedAt} + interval '6 months' < ${referenceTime}`;
 }
 
 export interface StaleIdentifier {
@@ -508,7 +508,7 @@ export interface Reservation {
   actorPubkey: string | null;
 }
 
-export async function getStaleIdentifiers(): Promise<StaleIdentifier[]> {
+export async function getStaleIdentifiers(referenceTime: Date | SQL = sql`now()`): Promise<StaleIdentifier[]> {
   return db
     .select({
       name: identifiers.name,
@@ -516,7 +516,7 @@ export async function getStaleIdentifiers(): Promise<StaleIdentifier[]> {
       lastIdentifiedAt: identifiers.lastIdentifiedAt
     })
     .from(identifiers)
-    .where(and(eq(identifiers.status, 'claimed'), staleIdentifierCondition()))
+    .where(and(eq(identifiers.status, 'claimed'), staleIdentifierCondition(referenceTime)))
     .orderBy(asc(identifiers.lastIdentifiedAt));
 }
 
@@ -911,12 +911,12 @@ describe('POST /api/admin/force-release', () => {
   });
 
   it('force-releases a genuinely stale identifier, with an audit row and cache invalidation', async () => {
-    const sevenMonthsAgo = new Date(Date.now() - 7 * 30 * 24 * 60 * 60 * 1000);
+    const staleAt = new Date('2025-01-01T00:00:00.000Z');
     await db.insert(identifiers).values({
       name: TEST_NAME,
       status: 'claimed',
       ownerPubkey: 'a'.repeat(64),
-      lastIdentifiedAt: sevenMonthsAgo
+      lastIdentifiedAt: staleAt
     });
     await valkey.set('identifier:' + TEST_NAME, JSON.stringify({ pubkey: 'a'.repeat(64), relays: [] }), 'EX', 300);
 
@@ -1065,12 +1065,12 @@ describe('admin page load', () => {
   });
 
   it('returns stale and reservation lists for an admin', async () => {
-    const sevenMonthsAgo = new Date(Date.now() - 7 * 30 * 24 * 60 * 60 * 1000);
+    const staleAt = new Date('2025-01-01T00:00:00.000Z');
     await db.insert(identifiers).values({
       name: TEST_NAME,
       status: 'claimed',
       ownerPubkey: 'a'.repeat(64),
-      lastIdentifiedAt: sevenMonthsAgo
+      lastIdentifiedAt: staleAt
     });
 
     const result = await load(loadEvent({ pubkey: ADMIN_PUBKEY }));
@@ -1145,6 +1145,8 @@ git commit -m "feat: add /admin load guard"
 
 **Accessibility correction:** force-release and reservation-remove are destructive hard-interrupt dialogs. On open each records its launcher and focuses a safe control; Tab and Shift+Tab stay contained; Escape closes only while idle; Cancel, Escape, and failed requests restore focus. Network failures become concise user-safe errors and never leave either dialog busy or unusable.
 
+Add mounted/Playwright coverage for both dialogs: safe initial Cancel focus; forward and reverse wrapping through force-release reason/action/Cancel and removal action/Cancel; idle Escape restores the launcher; a pending rejected fetch focuses and traps the dialog fallback, then restores a safe in-dialog action with the exact recovery message. Assert no outside click dismisses either dialog.
+
 - [ ] **Step 1: Write `+page.svelte`**
 
 ```svelte
@@ -1207,9 +1209,10 @@ git commit -m "feat: add /admin load guard"
     }
     if (event.key !== 'Tab') return;
     event.preventDefault();
-    // No outside-click dismissal. Pending requests keep focus on the dialog; idle Tab/Shift+Tab
-    // cycles through its safe cancel, destructive action, and any required reason input.
-    destructiveDialog?.focus();
+    if (pending) { destructiveDialog?.focus(); return; }
+    const focusable = [...(destructiveDialog?.querySelectorAll<HTMLElement>('input:not([disabled]), button:not([disabled])') ?? [])];
+    const index = focusable.indexOf(document.activeElement as HTMLElement);
+    focusable[(index + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length]?.focus();
   }
 
   async function confirmForceRelease() {
@@ -1229,6 +1232,8 @@ git commit -m "feat: add /admin load guard"
       const body = await response.json().catch(() => ({ error: 'unknown_error' }));
       releaseError = body.error;
     }
+    } catch {
+      releaseError = 'We could not force-release this identifier. Please try again.';
     } finally {
       releasePending = false;
       if (releaseError) void tick().then(() => destructiveSafeAction?.focus());
@@ -1269,7 +1274,9 @@ git commit -m "feat: add /admin load guard"
       if (response.status === 200) {
         reservations = reservations.filter((row) => row.name !== reservationRemovalTarget);
         reservationRemovalTarget = null;
-      } else removalError = (await response.json().catch(() => ({ error: 'Could not remove the reservation.' }))).error;
+      } else removalError = (await response.json().catch(() => ({ error: 'Could not remove the reservation. Please try again.' }))).error;
+    } catch {
+      removalError = 'We could not remove the reservation. Please try again.';
     } finally {
       removalPending = false;
       if (removalError) void tick().then(() => destructiveSafeAction?.focus());

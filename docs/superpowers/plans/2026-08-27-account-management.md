@@ -304,7 +304,7 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run "src/routes/api/account/relays/server.test.ts"`
-Expected: all helper assertions in the current snippet pass.
+Expected: all route assertions in the current snippet pass.
 
 - [ ] **Step 5: Commit**
 

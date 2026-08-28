@@ -1410,8 +1410,8 @@ git commit -m "feat: add /admin screen"
 - Create: `tests/e2e/admin-dashboard.spec.ts`
 
 **Interfaces:**
-- Consumes: the full stack from Tasks 1–10; `finalizeEvent`, `getPublicKey` from `nostr-tools`
-- Produces: `installFixedAdminExtension(page: Page): Promise<void>` from `tests/e2e/helpers/fixedAdminSigner.ts`; a new passing e2e test
+- Consumes: the full stack from Tasks 1–10; `finalizeEvent`, `getPublicKey` from `nostr-tools`; `db`, `identifiers`, and `identifierEvents` for explicit e2e fixture setup and cleanup
+- Produces: `installFixedAdminExtension(page: Page): Promise<void>` and `signInAsFixedAdmin(page: Page): Promise<void>` from `tests/e2e/helpers/fixedAdminSigner.ts`; passing e2e coverage for both destructive Admin dialogs
 
 - [ ] **Step 1: Write `tests/e2e/helpers/fixedAdminSigner.ts`**
 
@@ -1432,12 +1432,20 @@ export async function installFixedAdminExtension(page: Page): Promise<void> {
   });
 
   await page.addInitScript(() => {
-    // @ts-expect-error test-only global bridge
     window.nostr = {
+      // @ts-expect-error test-only global bridge
       getPublicKey: () => window.__testGetPublicKey(),
+      // @ts-expect-error test-only global bridge
       signEvent: (template: unknown) => window.__testSignEvent(template)
     };
   });
+}
+
+export async function signInAsFixedAdmin(page: Page): Promise<void> {
+  await installFixedAdminExtension(page);
+  await page.goto('/login');
+  await page.getByRole('button', { name: 'Sign in with extension' }).click();
+  await page.waitForURL('**/claim');
 }
 ```
 
@@ -1445,71 +1453,186 @@ export async function installFixedAdminExtension(page: Page): Promise<void> {
 
 ```ts
 // tests/e2e/admin-dashboard.spec.ts
-import { test, expect } from '@playwright/test';
-import { installFixedAdminExtension } from './helpers/fixedAdminSigner';
+import { expect, test } from '@playwright/test';
+import { inArray } from 'drizzle-orm';
+import { db } from '../../src/lib/server/db';
+import { identifierEvents, identifiers } from '../../src/lib/server/db/schema';
+import { signInAsFixedAdmin } from './helpers/fixedAdminSigner';
 
-test('admin can view the report and manage reservations', async ({ page }) => {
-  await installFixedAdminExtension(page);
+const STALE_NAME = 'stale-e2e';
+const RESERVATION_NAME = 'e2e-admin-reservation';
+const FIXTURE_NAMES = [STALE_NAME, RESERVATION_NAME];
+const FORCE_RELEASE_ROUTE = '**/api/admin/force-release';
+const REMOVE_RESERVATION_ROUTE = '**/api/admin/reservations/*';
 
-  await page.goto('/login');
-  await page.getByRole('button', { name: 'Sign in with extension' }).click();
-  await page.waitForURL('**/claim');
+async function cleanAdminFixtures(): Promise<void> {
+  await db.delete(identifierEvents).where(inArray(identifierEvents.identifierName, FIXTURE_NAMES));
+  await db.delete(identifiers).where(inArray(identifiers.name, FIXTURE_NAMES));
+}
+
+async function seedStaleClaimedIdentifier(): Promise<void> {
+  await db.insert(identifiers).values({
+    name: STALE_NAME,
+    status: 'claimed',
+    ownerPubkey: '1'.repeat(64),
+    lastIdentifiedAt: new Date('2025-01-01T00:00:00.000Z')
+  });
+}
+
+test.beforeEach(cleanAdminFixtures);
+test.afterEach(cleanAdminFixtures);
+
+test('reservation removal contains focus and recovers from a rejected request', async ({ page }) => {
+  await signInAsFixedAdmin(page);
 
   await page.goto('/admin');
   await expect(page.getByRole('heading', { name: 'Stale identifiers' })).toBeVisible();
 
-  const reservationName = 'e2eresadmin' + Date.now();
-  await page.getByLabel('Name').fill(reservationName);
-  await page.getByLabel('Reason').fill('e2e test reservation');
+  await page.getByLabel('Name', { exact: true }).fill(RESERVATION_NAME);
+  await page.getByLabel('Reason', { exact: true }).fill('e2e test reservation');
   await page.getByRole('button', { name: 'Add reservation' }).click();
-  await expect(page.getByText(reservationName)).toBeVisible();
+  const reservationRow = page.getByRole('row', { name: new RegExp(RESERVATION_NAME) });
+  await expect(reservationRow).toBeVisible();
 
-  await page
-    .getByRole('row', { name: new RegExp(reservationName) })
-    .getByRole('button', { name: 'Remove' })
-    .click();
-  const removalDialog = page.getByRole('dialog');
-  await expect(removalDialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  const launcher = reservationRow.getByRole('button', { name: 'Remove', exact: true });
+  await launcher.click();
+  const dialog = page.getByRole('dialog');
+  const action = dialog.getByRole('button', { name: 'Remove reservation' });
+  const cancel = dialog.getByRole('button', { name: 'Cancel' });
+
+  await expect(cancel).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(removalDialog.getByRole('button', { name: 'Remove reservation' })).toBeFocused();
+  await expect(action).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(cancel).toBeFocused();
   await page.keyboard.press('Shift+Tab');
-  await expect(removalDialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
-  await page.mouse.click(0, 0);
-  await expect(removalDialog).toBeVisible();
+  await expect(action).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(cancel).toBeFocused();
   await page.keyboard.press('Escape');
-  await expect(removalDialog).toBeHidden();
+  await expect(dialog).toBeHidden();
+  await expect(launcher).toBeFocused();
 
-  await page.getByRole('row', { name: new RegExp(reservationName) }).getByRole('button', { name: 'Remove' }).click();
-  await page.getByRole('button', { name: 'Remove reservation' }).click();
-  await expect(page.getByText(reservationName)).not.toBeVisible();
+  await launcher.click();
+  await page.mouse.click(0, 0);
+  await expect(dialog).toBeVisible();
+
+  let requestStartedResolve!: () => void;
+  const requestStarted = new Promise<void>((resolve) => {
+    requestStartedResolve = resolve;
+  });
+  let rejectRequest!: () => Promise<void>;
+  await page.route(REMOVE_RESERVATION_ROUTE, async (route) => {
+    requestStartedResolve();
+    await new Promise<void>((resolve) => {
+      rejectRequest = async () => {
+        await route.abort('failed');
+        resolve();
+      };
+    });
+  });
+
+  await action.click();
+  await requestStarted;
+  await expect(dialog).toBeFocused();
+  await expect(action).toBeDisabled();
+  await expect(cancel).toBeDisabled();
+  await page.keyboard.press('Tab');
+  await expect(dialog).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(dialog).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+
+  await rejectRequest();
+  await expect(
+    dialog.getByText('We could not remove the reservation. Please try again.')
+  ).toBeVisible();
+  await expect(dialog).toBeVisible();
+  await expect(action).toBeEnabled();
+  await expect(cancel).toBeEnabled();
+  await expect(cancel).toBeFocused();
+
+  await page.unroute(REMOVE_RESERVATION_ROUTE);
+  await action.click();
+  await expect(reservationRow).toBeHidden();
 });
 
-test('force-release dialog has the same hard-interrupt behavior', async ({ page }) => {
-  await installFixedAdminExtension(page);
-  // Seed one stale identifier through the Task 5 fixed-reference fixture before navigating.
+test('force release contains focus and recovers from a rejected request', async ({ page }) => {
+  await signInAsFixedAdmin(page);
+  await seedStaleClaimedIdentifier();
   await page.goto('/admin');
-  const launcher = page.getByRole('button', { name: 'Force release stale-e2e' });
+
+  const staleRow = page.getByRole('row', { name: new RegExp(STALE_NAME) });
+  await expect(staleRow).toBeVisible();
+  const launcher = staleRow.getByRole('button', { name: 'Force release', exact: true });
   await launcher.click();
   const dialog = page.getByRole('dialog');
   const reason = dialog.getByLabel('Reason (required)');
-  const action = dialog.getByRole('button', { name: 'Force release stale-e2e' });
+  const action = dialog.getByRole('button', { name: `Force release ${STALE_NAME}` });
   const cancel = dialog.getByRole('button', { name: 'Cancel' });
+
   await expect(cancel).toBeFocused();
-  await page.keyboard.press('Tab'); await expect(reason).toBeFocused();
-  await page.keyboard.press('Tab'); await expect(action).toBeFocused();
-  await page.keyboard.press('Tab'); await expect(cancel).toBeFocused();
-  await page.keyboard.press('Shift+Tab'); await expect(action).toBeFocused();
-  await page.keyboard.press('Escape'); await expect(dialog).toBeHidden(); await expect(launcher).toBeFocused();
-  let rejectRequest: (() => void) | undefined;
-  await page.route('**/api/admin/force-release', async (route) => {
-    await new Promise<void>((resolve) => { rejectRequest = () => { void route.abort('failed'); resolve(); }; });
+  await page.keyboard.press('Tab');
+  await expect(reason).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('Tab');
+  await reason.fill('e2e recovery');
+  await page.keyboard.press('Tab');
+  await expect(action).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(action).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(launcher).toBeFocused();
+
+  await launcher.click();
+  await page.mouse.click(0, 0);
+  await expect(dialog).toBeVisible();
+  await reason.fill('e2e recovery');
+
+  let requestStartedResolve!: () => void;
+  const requestStarted = new Promise<void>((resolve) => {
+    requestStartedResolve = resolve;
   });
-  await launcher.click(); await reason.fill('e2e recovery'); await action.click();
-  await expect(dialog).toBeFocused(); await page.keyboard.press('Tab'); await expect(dialog).toBeFocused();
-  await page.keyboard.press('Escape'); await expect(dialog).toBeVisible();
-  rejectRequest?.();
-  await expect(dialog.getByText('We could not force-release this identifier. Please try again.')).toBeVisible();
-  await expect(action).toBeEnabled(); await expect(action).toBeFocused();
+  let rejectRequest!: () => Promise<void>;
+  await page.route(FORCE_RELEASE_ROUTE, async (route) => {
+    requestStartedResolve();
+    await new Promise<void>((resolve) => {
+      rejectRequest = async () => {
+        await route.abort('failed');
+        resolve();
+      };
+    });
+  });
+
+  await action.click();
+  await requestStarted;
+  await expect(dialog).toBeFocused();
+  await expect(action).toBeDisabled();
+  await expect(cancel).toBeDisabled();
+  await page.keyboard.press('Tab');
+  await expect(dialog).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(dialog).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+
+  await rejectRequest();
+  await expect(
+    dialog.getByText('We could not force-release this identifier. Please try again.')
+  ).toBeVisible();
+  await expect(dialog).toBeVisible();
+  await expect(action).toBeEnabled();
+  await expect(cancel).toBeEnabled();
+  await expect(cancel).toBeFocused();
+
+  await page.unroute(FORCE_RELEASE_ROUTE);
+  await action.click();
+  await expect(staleRow).toBeHidden();
 });
 ```
 

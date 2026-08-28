@@ -322,6 +322,7 @@
           onclick={confirmForceRelease}
           disabled={!releaseReason.trim() || releasePending}
           aria-busy={releasePending}
+          aria-label={`Force release ${releaseTarget}`}
         >
           {releasePending ? 'Releasing…' : `Force release ${releaseTarget}`}
         </button>
@@ -367,6 +368,7 @@
           onclick={confirmReservationRemoval}
           disabled={removalPending}
           aria-busy={removalPending}
+          aria-label="Remove reservation"
         >
           {removalPending ? 'Removing…' : 'Remove reservation'}
         </button>

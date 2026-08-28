@@ -54,7 +54,7 @@ export async function getReservations(): Promise<Reservation[]> {
             eq(identifierEvents.eventType, 'reserved')
           )
         )
-        .orderBy(desc(identifierEvents.createdAt))
+        .orderBy(desc(identifierEvents.createdAt), desc(identifierEvents.id))
         .limit(1);
       return { ...row, reason: event?.reason ?? null, actorPubkey: event?.actorPubkey ?? null };
     })

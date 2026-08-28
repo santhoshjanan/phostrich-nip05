@@ -73,4 +73,30 @@ describe('getReservations', () => {
     expect(row?.reason).toBe('trademark hold');
     expect(row?.actorPubkey).toBe('c'.repeat(64));
   });
+
+  it('uses the later event ID when reserved events share a createdAt timestamp', async () => {
+    const createdAt = new Date('2026-08-31T00:00:00.000Z');
+    await db
+      .insert(identifiers)
+      .values({ name: RESERVED_NAME, status: 'reserved', ownerPubkey: null });
+    await db.insert(identifierEvents).values({
+      identifierName: RESERVED_NAME,
+      eventType: 'reserved',
+      actorPubkey: 'a'.repeat(64),
+      reason: 'initial hold',
+      createdAt
+    });
+    await db.insert(identifierEvents).values({
+      identifierName: RESERVED_NAME,
+      eventType: 'reserved',
+      actorPubkey: 'b'.repeat(64),
+      reason: 'updated hold',
+      createdAt
+    });
+
+    const result = await getReservations();
+    const row = result.find((r) => r.name === RESERVED_NAME);
+    expect(row?.reason).toBe('updated hold');
+    expect(row?.actorPubkey).toBe('b'.repeat(64));
+  });
 });

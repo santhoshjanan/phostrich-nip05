@@ -88,6 +88,7 @@ async function saveSuccessfully() {
 }
 
 async function saveWithIndexedError() {
+  await tick();
   vi.stubGlobal(
     'fetch',
     vi.fn(
@@ -146,6 +147,29 @@ describe('account relay editor', () => {
     expect(input.getAttribute('aria-invalid')).toBe('true');
     expect(input.getAttribute('aria-describedby')).toBe('relay-0-error');
     expect(error?.textContent).toContain('not a valid URL');
+  });
+
+  it('associates a submitted relay error with its visible row after a blank row', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: 'relay 1: not a valid URL' }), { status: 400 })
+      )
+    );
+    renderAccount();
+    await tick();
+
+    await editRelay(0, '');
+    button('Add relay').click();
+    await tick();
+    await editRelay(1, 'not-a-url');
+    button('Save relays').click();
+    await vi.waitFor(() => expect(document.querySelector('[role="alert"]')).not.toBeNull());
+
+    expect(relayInput(0).getAttribute('aria-invalid')).toBeNull();
+    expect(relayInput(1).getAttribute('aria-invalid')).toBe('true');
+    expect(document.getElementById('relay-1-error')?.textContent).toContain('not a valid URL');
   });
 
   it('clears saved state when editing a relay', async () => {

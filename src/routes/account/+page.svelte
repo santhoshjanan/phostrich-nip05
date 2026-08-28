@@ -76,8 +76,11 @@
     saveError = '';
     relayErrorIndex = null;
     relayErrorMessage = '';
+    const submittedRelays = relays
+      .map((relay, visibleIndex) => ({ relay, visibleIndex }))
+      .filter(({ relay }) => relay.trim().length > 0);
     try {
-      const result = await saveRelays(relays.filter((relay) => relay.trim().length > 0));
+      const result = await saveRelays(submittedRelays.map(({ relay }) => relay));
       if (requestRevision !== relayDraftRevision) return;
 
       if (result.ok) {
@@ -87,8 +90,11 @@
       }
 
       const relayError = parseRelayError(result.error);
-      if (relayError && relayError.index < relays.length) {
-        relayErrorIndex = relayError.index;
+      const visibleErrorIndex = relayError
+        ? submittedRelays[relayError.index]?.visibleIndex
+        : undefined;
+      if (relayError && visibleErrorIndex !== undefined) {
+        relayErrorIndex = visibleErrorIndex;
         relayErrorMessage = relayError.message;
         return;
       }

@@ -115,7 +115,7 @@ Availability is decided by the constraint, not by a read-then-write. Attempt the
 
 Two kinds of reservation, deliberately stored differently:
 
-- **Exact names → database, admin-editable.** Rows with `status = 'reserved'`, plus a reason and the admin pubkey that set it. Reservations have a lifecycle (held for a trademark, later granted or released) and need an audit trail, so they must be changeable without a redeploy. The admin settings page is the surface for this.
+- **Exact names → database, admin-editable.** Rows with `status = 'reserved'`, plus a required, server-trimmed nonblank reason and the admin pubkey that set it. Reservations have a lifecycle (held for a trademark, later granted or released) and need an audit trail, so they must be changeable without a redeploy. The admin settings page is the surface for this.
 - **Patterns → config, code-reviewed.** `admin`, `support`, `help`, `phostrich`, anything matching `^_`, slur substrings. These are rules rather than data, they change rarely, and they should go through review rather than a dashboard form. Checked at claim time, before the insert.
 
 `_` is the root identifier: `nostr.json?name=_` identifies the *domain itself*, so `phostrich.com` resolves as an identity. Point it at the platform's own pubkey and block it from the claim path entirely — never let it reach the user-claimable pool.
@@ -132,7 +132,7 @@ Also enforce at claim time: a length range, no leading or trailing `.`/`-`/`_`, 
 - At claim time, a modal states the inactivity policy in plain terms (identifier freed after N months with no lookup) before the claim is confirmed — this is the only place the policy is communicated, so its wording is worth getting right and worth a coverage test that it appears.
 - The account page shows the current status next to each owned identifier — `Last NIP-05 lookup` and a calm `Eligible for release after` line — so a returning user can see it without having remembered the modal.
 - The Admin report is a live database query, sorted by staleness. There is no scheduled scan job: with no warning channel, materialized report, or automatic deletion, a background scan would only duplicate eligibility logic. Both the report and the force-release mutation use the same PostgreSQL condition, `last_identified_at + interval '6 months' < now()`. This addition direction preserves calendar month-end behavior: August 31 plus six months is February 28.
-- Admin reviews the flagged list and force-releases individual names by hand, with a required reason. Its conditional delete and `force_released` audit insertion occur in the same transaction; cache invalidation remains fail-open after commit. It is deliberately manual: an unattended auto-release on a Nostr identity has a high blast radius for a false positive.
+- Admin reviews the flagged list and force-releases individual names by hand, with a required reason. Required Admin reasons are trimmed server-side, rejected when empty after trimming, and persisted in normalized form. The conditional delete and `force_released` audit insertion occur in the same transaction; cache invalidation remains fail-open after commit. It is deliberately manual: an unattended auto-release on a Nostr identity has a high blast radius for a false positive.
 
 This closes out the DM/warning tension: v1 needs no DM-send capability for expiry at all. The DM-OTP auth fallback above is a separate, still-open question — if it's never built, v1 sends no DMs whatsoever.
 

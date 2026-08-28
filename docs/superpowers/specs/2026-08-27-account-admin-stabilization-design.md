@@ -76,7 +76,7 @@ This pass does not add autosave or navigation interception.
 
 ### Indexed relay errors
 
-The server's established `relay N: …` error contract is preserved. The page extracts the one-based relay index, associates the message with that input through `aria-invalid` and `aria-describedby`, and renders the recovery message adjacent to the row. Non-indexed transport or section errors remain at section level.
+The server's established `relay N: …` error contract is preserved. Because blank visible rows are omitted from the submitted array, the page snapshots a submitted-index-to-visible-index mapping with each save and translates the one-based server index through it. It then associates the message with that visible input through `aria-invalid` and `aria-describedby`, and renders the recovery message adjacent to the row. Non-indexed transport or section errors remain at section level.
 
 The relay section states that entries are public, accepts `wss://`, and shows the current count out of eight without introducing a new panel or badge treatment.
 
@@ -112,10 +112,13 @@ Reservation removal conditionally deletes only `status = 'reserved'` and inserts
 
 Force release rechecks the shared six-calendar-month predicate and conditionally deletes the claimed identifier inside the same transaction that inserts `force_released`. It writes no audit event when eligibility fails. Cache invalidation remains fail-open and occurs only after commit.
 
+Reservation creation and force release trim their required reason in the server service, reject empty-after-trim values, and persist the trimmed value. Client-side trimming only aligns affordances; it is never the enforcement boundary.
+
 ### Plan and UI corrections
 
 - Route-adjacent tests use `server.test.ts` and `page.server.test.ts`; filenames beginning with `+` remain reserved for SvelteKit route modules.
 - Admin UI uses canonical tokens from `DESIGN.md`, including `--font-ui`, `--color-line`, and existing rose/mint text tokens. Undefined navy/cream/oxblood tokens and whole-table monospace styling are removed from the plan.
+- Admin destructive dialogs expose visible headings and consequence descriptions through `aria-labelledby` and `aria-describedby`, and the client uses typed total helpers plus pending/finalizer guards for every write.
 - Tasks 1–4 are recorded as completed prerequisites. No duplicate configuration, helper, enum migration, or validation-split work is generated.
 - Final Admin verification includes formatting, lint, Svelte/type checks, coverage, build, and Playwright, with expected counts derived from the tests that actually exist.
 

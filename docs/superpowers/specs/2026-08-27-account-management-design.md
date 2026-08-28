@@ -34,7 +34,7 @@ Sub-project 4 of the Phostrich build order (see `docs/SPEC.md` for full product/
 
 ## Data flow
 
-Edit relay rows client-side (add/remove/edit) → mark the draft dirty and clear stale success/errors → Save → total request helper → thin route → `saveOwnedRelays()` → page replaces the draft with normalized relays. Indexed `relay N: …` errors attach to the matching input; other errors remain section-level. Release → hard-interrupt confirmation → total request helper → thin route → `releaseOwnedIdentifier()` → on success, redirect to `/claim`.
+Edit relay rows client-side (add/remove/edit) → mark the draft dirty and clear stale success/errors → Save → snapshot nonblank submitted relays with their visible row indexes → total request helper → thin route → `saveOwnedRelays()` → page replaces the draft with normalized relays. Indexed `relay N: …` errors refer to the filtered submitted array and translate through that snapshot before attaching to the matching visible input; other errors remain section-level. Release → hard-interrupt confirmation → total request helper → thin route → `releaseOwnedIdentifier()` → on success, redirect to `/claim`.
 
 ## Inactivity status display
 
@@ -47,7 +47,7 @@ Both computed client-side from `last_identified_at` returned by the load functio
 ## Error handling
 
 - Client request helpers are total: rejected fetches, aborts, and unusable error bodies become concise user-safe failures; raw exception text is never rendered. Saving/releasing state is always cleared defensively; a failed release leaves the dialog usable.
-- Indexed relay errors set `aria-invalid` and `aria-describedby` on the associated row; non-indexed errors remain at section level.
+- Indexed relay errors translate from the filtered submitted array to the visible draft row, then set `aria-invalid` and `aria-describedby` there; non-indexed errors remain at section level.
 - The release dialog focuses Cancel on open, contains Tab and Shift+Tab, closes on Escape only while idle, and restores focus after Cancel, Escape, or a failed release.
 - `PUT /api/account/relays` → 401 unauthenticated; specific validation-error messages (see above) otherwise.
 - `POST /api/account/release` → 401 unauthenticated; 404 if the caller owns nothing.

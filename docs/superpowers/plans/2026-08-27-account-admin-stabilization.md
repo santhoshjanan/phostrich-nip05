@@ -293,7 +293,7 @@ git commit -m "fix: make account mutations owner-atomic"
 - Consumes: existing `/api/account/relays` and `/api/account/release` response shapes.
 - Produces: both request helpers always resolve to their existing discriminated result union, including rejected fetches.
 - Produces: `parseRelayError(error: string): { index: number; message: string } | null`, where `index` is zero-based.
-- Produces: mounted account-page behavior that clears saved/error state on every draft mutation and associates indexed errors with the correct row.
+- Produces: mounted account-page behavior that clears saved/error state on every draft mutation and translates filtered submitted relay indexes to the correct visible row.
 
 - [ ] **Step 1: Write failing helper tests for rejected and malformed responses**
 
@@ -376,6 +376,7 @@ Add these tests:
 2. A rejected save re-enables Save and shows `NETWORK_ERROR` rather than leaving `Saving…`.
 3. A 400 `relay 1: not a valid URL` response marks Relay 1 `aria-invalid="true"`, sets `aria-describedby` to the adjacent error element, and renders `not a valid URL` there.
 4. Editing, adding, or removing a row clears the previous row error and saved state.
+5. With a blank visible row before an invalid nonblank row, a `relay 1: ...` response marks the second visible row, not the blank first row.
 
 The test must interact through labels and buttons on the mounted component, not call internal component functions.
 
@@ -391,7 +392,7 @@ In `+page.svelte`:
 - Add `relayErrorIndex: number | null` and `relayErrorMessage` state.
 - Add one `markRelaysDirty()` function that resets `saveStatus`, section error, and indexed error state; call it from add, edit, and remove.
 - In `save()`, use `try/finally` so a non-success path cannot leave `saveStatus === 'saving'`; only retain `saved` after success.
-- Parse failures with `parseRelayError`. Indexed errors render immediately after their row with stable id `relay-${index}-error`; inputs receive `aria-invalid` and `aria-describedby`. Other errors remain in the section alert.
+- Snapshot nonblank submitted relays together with their visible indexes before calling `saveRelays`. Parse failures with `parseRelayError`, translate the submitted index through that snapshot, and render the error immediately after the visible row with stable id `relay-${index}-error`; inputs receive `aria-invalid` and `aria-describedby`. Other errors remain in the section alert.
 - Preserve server-normalized relays on success.
 - Add calm section guidance: `Public · wss:// only · {relays.length} of 8`.
 

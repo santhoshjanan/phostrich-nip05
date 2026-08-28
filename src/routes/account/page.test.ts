@@ -50,8 +50,10 @@ function dialog(): HTMLElement {
   return result;
 }
 
-function pressKey(target: Element, key: string, shiftKey = false) {
-  target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, shiftKey }));
+function pressKey(target: Element, key: string, shiftKey = false): KeyboardEvent {
+  const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, shiftKey });
+  target.dispatchEvent(event);
+  return event;
 }
 
 function relayInput(index: number): HTMLInputElement {
@@ -338,6 +340,47 @@ describe('account release dialog', () => {
     expect(release.disabled).toBe(false);
     expect(document.body.textContent).not.toContain('Releasing…');
     expect(dialog().contains(document.activeElement)).toBe(true);
+  });
+
+  it('keeps focus inside the dialog while a release request is pending', async () => {
+    let rejectRequest: ((reason?: unknown) => void) | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((_, reject) => {
+            rejectRequest = reject;
+          })
+      )
+    );
+    renderAccount();
+
+    button('Release this identifier').click();
+    await tick();
+    button('Release alice').click();
+    await tick();
+
+    const releaseDialog = dialog();
+    expect(document.activeElement).toBe(releaseDialog);
+    const tab = pressKey(releaseDialog, 'Tab');
+    expect(tab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(releaseDialog);
+    const shiftTab = pressKey(releaseDialog, 'Tab', true);
+    expect(shiftTab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(releaseDialog);
+    pressKey(releaseDialog, 'Escape');
+    expect(document.querySelector('[role="dialog"]')).toBe(releaseDialog);
+    expect(document.activeElement).toBe(releaseDialog);
+
+    if (!rejectRequest) throw new Error('Release request did not start');
+    rejectRequest(new TypeError('network detail'));
+    await vi.waitFor(() => expect(button('Release alice').disabled).toBe(false));
+    await tick();
+
+    expect(document.body.textContent).toContain(
+      'Could not reach the server. Check your connection and try again.'
+    );
+    expect(releaseDialog.contains(document.activeElement)).toBe(true);
   });
 });
 

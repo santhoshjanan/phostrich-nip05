@@ -24,6 +24,7 @@
   let releaseLauncher = $state<HTMLButtonElement>();
   let releaseAction = $state<HTMLButtonElement>();
   let releaseCancel = $state<HTMLButtonElement>();
+  let releaseDialog = $state<HTMLDivElement>();
 
   const lastVerifiedDate = $derived(
     new Date(data.lastIdentifiedAt).toLocaleDateString(undefined, {
@@ -125,7 +126,13 @@
       return;
     }
 
-    if (event.key !== 'Tab' || releaseStatus === 'releasing') return;
+    if (event.key !== 'Tab') return;
+
+    if (releaseStatus === 'releasing') {
+      event.preventDefault();
+      releaseDialog?.focus();
+      return;
+    }
 
     event.preventDefault();
     const currentTarget = document.activeElement;
@@ -142,6 +149,9 @@
 
     releaseStatus = 'releasing';
     releaseError = '';
+    void tick().then(() => {
+      if (releaseStatus === 'releasing') releaseDialog?.focus();
+    });
     try {
       const result = await releaseIdentifier();
       if (result.ok) {
@@ -224,6 +234,7 @@
 
 {#if showReleaseModal}
   <div
+    bind:this={releaseDialog}
     class="modal"
     role="dialog"
     aria-modal="true"

@@ -19,10 +19,10 @@ function renderAccount() {
   component = mount(AccountPage, { target: document.body, props: { data: accountData } });
 }
 
-function button(label: string): HTMLButtonElement {
-  const result = [...document.querySelectorAll('button')].find(
+function button(label: string, occurrence = 0): HTMLButtonElement {
+  const result = [...document.querySelectorAll('button')].filter(
     (element) => element.textContent?.trim() === label
-  );
+  )[occurrence];
   if (!result) throw new Error(`Could not find button: ${label}`);
   return result;
 }
@@ -155,5 +155,42 @@ describe('account relay editor', () => {
     await tick();
 
     expect(document.getElementById('relay-0-error')).toBeNull();
+  });
+
+  it('keeps a mutated relay draft when an earlier save resolves', async () => {
+    let resolveFetch: ((response: Response) => void) | undefined;
+    let responseBodyRead = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveFetch = resolve;
+          })
+      )
+    );
+    renderAccount();
+
+    button('Save relays').click();
+    await tick();
+    await editRelay(0, 'wss://edited.example');
+    button('Add relay').click();
+    await tick();
+    button('Remove', 1).click();
+    await tick();
+
+    if (!resolveFetch) throw new Error('Save request did not start');
+    resolveFetch({
+      status: 200,
+      json: async () => {
+        responseBodyRead = true;
+        return { relays: ['wss://normalized.example/'] };
+      }
+    } as Response);
+    await vi.waitFor(() => expect(responseBodyRead).toBe(true));
+    await tick();
+
+    expect(relayInput(0).value).toBe('wss://edited.example');
+    expect(document.body.textContent).not.toContain('Saved');
   });
 });

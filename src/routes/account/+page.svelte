@@ -12,6 +12,7 @@
   let { data } = $props<{ data: { name: string; relays: string[]; lastIdentifiedAt: string } }>();
 
   let relays = $state<string[]>([]);
+  let relayDraftRevision = $state(0);
   let saveError = $state('');
   let saveStatus = $state<'idle' | 'saving' | 'saved'>('idle');
   let relayErrorIndex = $state<number | null>(null);
@@ -40,6 +41,7 @@
   });
 
   function markRelaysDirty() {
+    relayDraftRevision += 1;
     saveStatus = 'idle';
     saveError = '';
     relayErrorIndex = null;
@@ -64,12 +66,15 @@
   async function save() {
     if (saveStatus === 'saving') return;
 
+    const requestRevision = relayDraftRevision;
     saveStatus = 'saving';
     saveError = '';
     relayErrorIndex = null;
     relayErrorMessage = '';
     try {
       const result = await saveRelays(relays.filter((relay) => relay.trim().length > 0));
+      if (requestRevision !== relayDraftRevision) return;
+
       if (result.ok) {
         relays = result.relays;
         saveStatus = 'saved';
@@ -85,7 +90,9 @@
 
       saveError = result.error;
     } catch {
-      saveError = 'We could not save your relays. Please try again.';
+      if (requestRevision === relayDraftRevision) {
+        saveError = 'We could not save your relays. Please try again.';
+      }
     } finally {
       if (saveStatus === 'saving') saveStatus = 'idle';
     }

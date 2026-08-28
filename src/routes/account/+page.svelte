@@ -42,7 +42,7 @@
 
   function markRelaysDirty() {
     relayDraftRevision += 1;
-    saveStatus = 'idle';
+    if (saveStatus !== 'saving') saveStatus = 'idle';
     saveError = '';
     relayErrorIndex = null;
     relayErrorMessage = '';

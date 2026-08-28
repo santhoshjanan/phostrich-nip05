@@ -193,4 +193,47 @@ describe('account relay editor', () => {
     expect(relayInput(0).value).toBe('wss://edited.example');
     expect(document.body.textContent).not.toContain('Saved');
   });
+
+  it('keeps Save disabled until a stale save settles after editing', async () => {
+    let resolveFirstFetch: ((response: Response) => void) | undefined;
+    let firstResponseBodyRead = false;
+    let requestCount = 0;
+    const fetchMock = vi.fn(() => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFirstFetch = resolve;
+        });
+      }
+
+      return Promise.resolve(
+        new Response(JSON.stringify({ relays: ['wss://edited.example/'] }), { status: 200 })
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderAccount();
+
+    button('Save relays').click();
+    await tick();
+    await editRelay(0, 'wss://edited.example');
+
+    expect(button('Saving…').disabled).toBe(true);
+    if (!resolveFirstFetch) throw new Error('First save request did not start');
+    resolveFirstFetch({
+      status: 200,
+      json: async () => {
+        firstResponseBodyRead = true;
+        return { relays: ['wss://normalized.example/'] };
+      }
+    } as Response);
+    await vi.waitFor(() => expect(firstResponseBodyRead).toBe(true));
+    await tick();
+
+    expect(relayInput(0).value).toBe('wss://edited.example');
+    expect(document.body.textContent).not.toContain('Saved');
+    expect(button('Save relays').disabled).toBe(false);
+
+    button('Save relays').click();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
 });

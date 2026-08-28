@@ -14,6 +14,18 @@
 
 > **Execution status (2026-08-27):** Tasks 1–4 were completed at commit `3f34d20`. Their checklists below are preserved as implementation history and must not be repeated. Remaining execution begins at Task 5.
 
+### Remaining-work environment preflight
+
+Before Task 5, restore the ignored worktree-local environment and services that Task 1's historical instructions assumed:
+
+```bash
+test -f .env || cp .env.example .env
+docker compose up -d
+pnpm db:migrate
+```
+
+`.env.example` already contains the fixed Admin e2e pubkey. Keep the resulting `.env` untracked. Vite/Vitest commands below load it automatically. For Playwright preview runs, override the public origin explicitly with `PUBLIC_ORIGIN=http://localhost:4173`; the normal development value in `.env.example` is port 5173.
+
 ## Global Constraints
 
 - Privileged logic only in `src/lib/server/**`, relative imports inside it — same as every prior sub-project.
@@ -588,7 +600,7 @@ git commit -m "feat: add admin report queries"
 - Service consumes: `isValidNameFormat` from Task 4, `db`, `identifiers`, and `identifierEvents` through relative server-only imports.
 - Produces: `createAdminReservation(actorPubkey, rawName, rawReason): Promise<CreateAdminReservationResult>`. It normalizes the name, trims the reason, owns validation/transaction/conflict lookup, and returns a discriminated domain result.
 - Route consumes: `isAdmin` and `createAdminReservation`; it only authenticates, parses string shapes, calls the service, and maps the result.
-- Produces: `POST: RequestHandler` — `{name, reason}` on 201, 400 (invalid name / blank reason), 401 unauthenticated, 403 non-admin, 409 (`name_claimed` or `name_already_reserved`).
+- Produces: `POST: RequestHandler` — `{name, reason, actorPubkey, createdAt}` on 201 so the live table can render complete audit metadata without a reload; 400 (invalid name / blank reason), 401 unauthenticated, 403 non-admin, 409 (`name_claimed` or `name_already_reserved`).
 
 - [ ] **Step 1: Write failing service tests for validation, normalization, persistence, and audit**
 
@@ -632,7 +644,9 @@ describe('admin reservation service', () => {
     ).resolves.toEqual({
       ok: true,
       name: CREATE_NAME,
-      reason: 'trademark hold'
+      reason: 'trademark hold',
+      actorPubkey: ADMIN_PUBKEY,
+      createdAt: expect.any(Date)
     });
 
     const [event] = await db
@@ -691,7 +705,7 @@ import { identifierEvents, identifiers } from '../db/schema';
 import { isValidNameFormat } from './reservedPatterns';
 
 export type CreateAdminReservationResult =
-  | { ok: true; name: string; reason: string }
+  | { ok: true; name: string; reason: string; actorPubkey: string; createdAt: Date }
   | { ok: false; reason: 'invalid_name' | 'reason_required' | 'name_claimed' | 'name_already_reserved' };
 
 export async function createAdminReservation(
@@ -705,15 +719,20 @@ export async function createAdminReservation(
   if (!reason) return { ok: false, reason: 'reason_required' };
 
   try {
-    await db.transaction(async (tx) => {
-      await tx.insert(identifiers).values({ name, status: 'reserved', ownerPubkey: null });
+    const createdAt = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(identifiers)
+        .values({ name, status: 'reserved', ownerPubkey: null })
+        .returning({ createdAt: identifiers.createdAt });
       await tx.insert(identifierEvents).values({
         identifierName: name,
         eventType: 'reserved',
         actorPubkey,
         reason
       });
+      return created.createdAt;
     });
+    return { ok: true, name, reason, actorPubkey, createdAt };
   } catch (error) {
     const pgError = error as { code?: string; constraint_name?: string };
     if (pgError.code !== '23505' || pgError.constraint_name !== 'identifiers_name_unique') {
@@ -729,8 +748,6 @@ export async function createAdminReservation(
       reason: existing?.status === 'claimed' ? 'name_claimed' : 'name_already_reserved'
     };
   }
-
-  return { ok: true, name, reason };
 }
 ```
 
@@ -786,7 +803,12 @@ describe('POST /api/admin/reservations', () => {
       requestEvent({ name: TEST_NAME.toUpperCase(), reason: '  trademark hold  ' }, { pubkey: ADMIN_PUBKEY })
     );
     expect(response.status).toBe(201);
-    expect(await response.json()).toEqual({ name: TEST_NAME, reason: 'trademark hold' });
+    expect(await response.json()).toEqual({
+      name: TEST_NAME,
+      reason: 'trademark hold',
+      actorPubkey: ADMIN_PUBKEY,
+      createdAt: expect.any(String)
+    });
   });
 
   it('returns 400 when reason is whitespace-only', async () => {
@@ -839,7 +861,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     const status = result.reason === 'invalid_name' || result.reason === 'reason_required' ? 400 : 409;
     return json({ error: result.reason }, { status });
   }
-  return json({ name: result.name, reason: result.reason }, { status: 201 });
+  return json(
+    {
+      name: result.name,
+      reason: result.reason,
+      actorPubkey: result.actorPubkey,
+      createdAt: result.createdAt.toISOString()
+    },
+    { status: 201 }
+  );
 };
 ```
 
@@ -991,6 +1021,7 @@ import { identifierEvents, identifiers } from '$lib/server/db/schema';
 import { DELETE } from './+server';
 
 const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
+const NON_ADMIN_PUBKEY = 'd'.repeat(64);
 const TEST_NAME = 'admin-reservation-delete-test';
 const CLAIMED_OWNER = '5301000000000000000000000000000000000000000000000000000000000000';
 
@@ -1007,6 +1038,11 @@ describe('DELETE /api/admin/reservations/[name]', () => {
   it('returns 401 when unauthenticated', async () => {
     const response = await DELETE(requestEvent(TEST_NAME, null));
     expect(response.status).toBe(401);
+  });
+
+  it('returns 403 for an authenticated non-admin', async () => {
+    const response = await DELETE(requestEvent(TEST_NAME, { pubkey: NON_ADMIN_PUBKEY }));
+    expect(response.status).toBe(403);
   });
 
   it('returns 404 when there is no matching reserved row', async () => {
@@ -1289,6 +1325,7 @@ import { identifierEvents, identifiers } from '$lib/server/db/schema';
 import { POST } from './+server';
 
 const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
+const NON_ADMIN_PUBKEY = 'e'.repeat(64);
 const TEST_NAME = 'admin-force-release-test';
 const TEST_OWNER = '5402000000000000000000000000000000000000000000000000000000000000';
 
@@ -1311,6 +1348,13 @@ describe('POST /api/admin/force-release', () => {
   it('returns 401 when unauthenticated', async () => {
     const response = await POST(requestEvent({ name: TEST_NAME, reason: 'x' }, null));
     expect(response.status).toBe(401);
+  });
+
+  it('returns 403 for an authenticated non-admin', async () => {
+    const response = await POST(
+      requestEvent({ name: TEST_NAME, reason: 'x' }, { pubkey: NON_ADMIN_PUBKEY })
+    );
+    expect(response.status).toBe(403);
   });
 
   it('returns 404 when the identifier does not exist', async () => {
@@ -1593,7 +1637,9 @@ export async function createReservation(
   name: string,
   reason: string,
   fetcher: Fetcher = fetch
-): Promise<AdminWriteResult<{ name: string; reason: string }>> {
+): Promise<
+  AdminWriteResult<{ name: string; reason: string; actorPubkey: string; createdAt: string }>
+> {
   try {
     const response = await fetcher('/api/admin/reservations', {
       method: 'POST',
@@ -1603,9 +1649,19 @@ export async function createReservation(
     if (
       response.status === 201 &&
       typeof body?.name === 'string' &&
-      typeof body.reason === 'string'
+      typeof body.reason === 'string' &&
+      typeof body.actorPubkey === 'string' &&
+      typeof body.createdAt === 'string'
     ) {
-      return { ok: true, value: { name: body.name, reason: body.reason } };
+      return {
+        ok: true,
+        value: {
+          name: body.name,
+          reason: body.reason,
+          actorPubkey: body.actorPubkey,
+          createdAt: body.createdAt
+        }
+      };
     }
     return failure(body, CREATE_FALLBACK);
   } catch {
@@ -1772,14 +1828,7 @@ Expected: FAIL — `+page.svelte` does not exist.
     try {
       const result = await createReservation(newReservationName, newReservationReason);
       if (result.ok) {
-        reservations = [
-          ...reservations,
-          {
-            ...result.value,
-            actorPubkey: null,
-            createdAt: new Date().toISOString()
-          }
-        ];
+        reservations = [...reservations, result.value];
         newReservationName = '';
         newReservationReason = '';
       } else {
@@ -2220,8 +2269,8 @@ test('force release contains focus and recovers from a rejected request', async 
 
 - [ ] **Step 3: Run the full e2e suite**
 
-Run: `pnpm test:e2e`
-Expected: zero failures from the discovered Playwright suite. Requires `.env`'s `ADMIN_PUBKEYS` to include `0000000000000000000000000000000000000000000000000000000000000000` (Task 1) and `PUBLIC_ORIGIN` set for the preview port, as in prior plans.
+Run: `PUBLIC_ORIGIN=http://localhost:4173 pnpm test:e2e`
+Expected: zero failures from the discovered Playwright suite. The remaining-work preflight restores `.env`, whose `ADMIN_PUBKEYS` includes `0000000000000000000000000000000000000000000000000000000000000000`; the command override aligns auth validation with Playwright's preview port.
 
 - [ ] **Step 4: Commit**
 
@@ -2248,7 +2297,7 @@ Add a new section after "Account management":
 ```markdown
 ## Admin dashboard
 
-- `/admin` — visible only to pubkeys listed in `ADMIN_PUBKEYS`. Two sections: a live report of identifiers unverified for 6+ months (with force-release, reason required), and reservation management (add/remove, reason required on add).
+- `/admin` — visible only to pubkeys listed in `ADMIN_PUBKEYS`. Two sections: a live report of identifiers not looked up through NIP-05 for six calendar months (with force-release, reason required), and reservation management (add/remove, reason required on add).
 - Admin actions are always audit-logged to `identifier_events` with the acting admin's pubkey.
 ```
 
@@ -2264,7 +2313,7 @@ Expected: all succeed with no errors.
 
 - [ ] **Step 4: Run the e2e suite**
 
-Run: `pnpm test:e2e`
+Run: `PUBLIC_ORIGIN=http://localhost:4173 pnpm test:e2e`
 Expected: zero failures from the discovered suite.
 
 - [ ] **Step 5: Manual smoke test**

@@ -68,7 +68,7 @@ describe('PUT /api/account/relays', () => {
     const response = await PUT(requestEvent({ relays: ['not-a-url'] }, { pubkey: TEST_OWNER }));
 
     expect(response.status).toBe(400);
-    expect((await response.json()).error).toBe('relay 1: not a valid URL');
+    expect((await response.json()).error).toBe('relay 1: must be a valid URL');
   });
 
   it('returns not found without changing an identifier reclaimed by another owner', async () => {

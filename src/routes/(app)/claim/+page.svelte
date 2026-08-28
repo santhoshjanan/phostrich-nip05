@@ -155,14 +155,18 @@
   .modal {
     position: fixed;
     inset: 0;
+    z-index: 10;
     background: rgba(46, 42, 51, 0.5);
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: var(--space-2);
   }
   .modal__content {
-    background: white;
+    background: var(--color-paper);
     max-width: 24rem;
+    max-height: calc(100dvh - var(--space-2) - var(--space-2));
+    overflow-y: auto;
     padding: var(--space-4);
     border: 1px solid var(--color-line);
   }

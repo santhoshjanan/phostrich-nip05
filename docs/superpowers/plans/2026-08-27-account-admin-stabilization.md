@@ -18,7 +18,7 @@
 - Relay edits preserve the current API shape and validator behavior: at most 8, `wss://` in production, dev-only `ws://`, no credentials/query, normalized trailing slash, stable first-occurrence order.
 - Account UI remains in the incumbent Issued Credential visual system and preserves no-outside-click release dismissal.
 - `last_identified_at` is described as public NIP-05 lookup activity; eligibility remains six calendar months later.
-- Admin staleness uses PostgreSQL calendar arithmetic, `last_identified_at < now() - interval '6 months'`, through one shared future server condition.
+- Admin staleness uses PostgreSQL calendar arithmetic, `last_identified_at + interval '6 months' < now()`, through one shared future server condition. August 31 + six months = February 28, so subtraction is not equivalent.
 - Generated Impeccable artifacts are excluded from source formatting and are not committed with application changes.
 - All production behavior changes follow red-green-refactor. Test names state the production break they catch and assert real observable behavior.
 
@@ -464,7 +464,7 @@ Add a test asserting the real mounted page exposes:
 - `Public lookups keep this identifier active.`
 - The existing `Eligible for release after` evidence line.
 
-Expected RED: current page says `Last verified`. Update the component with the exact copy while preserving the calm evidence layout, then rerun for GREEN.
+Expected RED: current page uses the prior activity label. Update the component with the exact `Last NIP-05 lookup` copy while preserving the calm evidence layout, then rerun for GREEN.
 
 - [ ] **Step 5: Apply the Impeccable production-quality floor**
 
@@ -509,7 +509,7 @@ git commit -m "fix: complete account dialog accessibility"
 Replace the daily scheduled-job requirement in Identifier lifecycle with a live Admin query. State that no background scan exists because there is no warning channel, materialized report, or automatic deletion. Require both the report and force-release mutation to use the same PostgreSQL condition:
 
 ```sql
-last_identified_at < now() - interval '6 months'
+last_identified_at + interval '6 months' < now()
 ```
 
 Retain manual review, required force-release reason, atomic delete/audit, and fail-open post-commit invalidation.
@@ -535,7 +535,7 @@ Specify:
 Add a status note that Tasks 1–4 are already complete at commit `3f34d20` and must not be repeated. Correct the remaining tasks as follows:
 
 - Replace every route test filename beginning with `+` by `server.test.ts` or `page.server.test.ts`, including all file lists and commands.
-- Replace both `STALE_AFTER_MS = 6 * 30 * 24 * 60 * 60 * 1000` implementations with a shared `staleIdentifierCondition()` in `src/lib/server/identifiers/adminQueries.ts` that returns Drizzle SQL for `last_identified_at < now() - interval '6 months'`.
+- Replace both `STALE_AFTER_MS = 6 * 30 * 24 * 60 * 60 * 1000` implementations with a shared `staleIdentifierCondition()` in `src/lib/server/identifiers/adminQueries.ts` that returns Drizzle SQL for `last_identified_at + interval '6 months' < now()`; tests use literal month-end and leap-year addition boundaries.
 - Require report and force-release code to import that same condition.
 - Put reservation deletion plus `reservation_removed` insertion in one transaction.
 - Put force-release conditional deletion plus `force_released` insertion in one transaction; return 409 and write no event when no eligible row is returned.

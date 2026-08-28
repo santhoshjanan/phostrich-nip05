@@ -40,7 +40,7 @@ Edit relay rows client-side (add/remove/edit) → mark the draft dirty and clear
 
 Always shown together, same calm tone, no urgent color escalation (consistent with the direction's single-hairline-accent restraint and the "disclose policy up front, not as a surprise" product principle):
 - **Last NIP-05 lookup:** `last_identified_at`, formatted date, with helper copy that public lookup activity determines eligibility.
-- **Eligible for release after:** `last_identified_at` + 6 months, formatted date.
+- **Eligible for release after:** `last_identified_at` + 6 calendar months, formatted date. The forthcoming client helper must match PostgreSQL's month-end clamping (August 31 + six months = February 28) and has dedicated boundary tests.
 
 Both computed client-side from `last_identified_at` returned by the load function — no new backend computation needed, since the 6-month constant is already fixed (`docs/SPEC.md`).
 

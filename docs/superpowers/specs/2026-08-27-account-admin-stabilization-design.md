@@ -96,9 +96,9 @@ The implementation may use a small local client helper or Svelte action. It must
 
 ### Six calendar months
 
-The stale report and force-release eligibility use one shared server query condition based on PostgreSQL calendar arithmetic: `last_identified_at < now() - interval '6 months'`. No `6 * 30 days` millisecond constant is permitted.
+The stale report and force-release eligibility use one shared server query condition based on PostgreSQL calendar arithmetic: `last_identified_at + interval '6 months' < now()`. No `6 * 30 days` millisecond constant is permitted. Addition is binding because PostgreSQL month-clamps: August 31 plus six months is February 28; subtracting six months from February 28 is not equivalent.
 
-Boundary tests cover just inside and just outside the six-calendar-month threshold, including a month-end or leap-year case. Report and force-release must consume the same eligibility definition.
+Boundary tests cover literal just-inside and just-outside six-calendar-month addition boundaries, including month-end and leap-year cases. Report and force-release must consume the same eligibility definition.
 
 ### Live report; no scheduled scan job
 

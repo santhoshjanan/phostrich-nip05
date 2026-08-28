@@ -21,7 +21,7 @@
 - `/admin`: unauthenticated → redirect `/login`; authenticated non-admin → `403` (not a disguising redirect).
 - Staleness report is a **live query** — no background job dependency.
 - Reservation creation validates format only (`isValidNameFormat`, not the reserved-pattern blocklist).
-- Report and force-release import the same `staleIdentifierCondition()` from `src/lib/server/identifiers/adminQueries.ts`; it returns Drizzle SQL for `last_identified_at < now() - interval '6 months'`.
+- Report and force-release import the same `staleIdentifierCondition()` from `src/lib/server/identifiers/adminQueries.ts`; it returns Drizzle SQL for `last_identified_at + interval '6 months' < now()`, including PostgreSQL month-end clamping (August 31 + six months = February 28).
 - Force-release re-verifies that shared condition server-side inside the same delete, never trusting the report snapshot the admin is looking at.
 - Force-release requires a reason; reservation creation requires a reason. Reservation removal does not require one.
 - Admin-facing conflict/error messages may be specific (unlike the public-facing endpoints) — the admin already sees the full picture in the report.
@@ -406,9 +406,9 @@ git commit -m "refactor: split isClaimableName into isValidNameFormat plus block
 
 **Interfaces:**
 - Consumes: `db`, `identifiers`, `identifierEvents` (`../db`, `../db/schema`)
-- Produces: `staleIdentifierCondition()` (the single PostgreSQL `last_identified_at < now() - interval '6 months'` condition), `getStaleIdentifiers(): Promise<StaleIdentifier[]>`, and `getReservations(): Promise<Reservation[]>` from `src/lib/server/identifiers/adminQueries.ts`
+- Produces: `staleIdentifierCondition()` (the single PostgreSQL `last_identified_at + interval '6 months' < now()` condition), `getStaleIdentifiers(): Promise<StaleIdentifier[]>`, and `getReservations(): Promise<Reservation[]>` from `src/lib/server/identifiers/adminQueries.ts`
 
-Tests must include just-inside and just-outside six-calendar-month boundaries, including a month-end or leap-year case, and both the report and force-release consume this one condition.
+Tests must use literal shared-condition boundaries: an identifier with `last_identified_at = '2026-08-31T00:00:00Z'` is not eligible at `now() = '2027-02-28T00:00:00Z'` and is eligible just after it; include a leap-year case too. Both report and force-release consume this one condition.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -492,7 +492,7 @@ import { db } from '../db';
 import { identifierEvents, identifiers } from '../db/schema';
 
 export function staleIdentifierCondition() {
-  return sql`${identifiers.lastIdentifiedAt} < now() - interval '6 months'`;
+  return sql`${identifiers.lastIdentifiedAt} + interval '6 months' < now()`;
 }
 
 export interface StaleIdentifier {
@@ -998,7 +998,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       return json({ error: 'not_found' }, { status: 404 });
     }
     return json(
-      { error: `no longer eligible, last verified ${current.lastIdentifiedAt.toISOString()}` },
+      { error: `no longer eligible, last NIP-05 lookup ${current.lastIdentifiedAt.toISOString()}` },
       { status: 409 }
     );
   }
@@ -1150,6 +1150,7 @@ git commit -m "feat: add /admin load guard"
 ```svelte
 <!-- src/routes/admin/+page.svelte -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
 
   let { data } = $props<{
@@ -1165,19 +1166,58 @@ git commit -m "feat: add /admin load guard"
   let releaseTarget = $state<string | null>(null);
   let releaseReason = $state('');
   let releaseError = $state('');
+  let releasePending = $state(false);
+  let reservationRemovalTarget = $state<string | null>(null);
+  let removalError = $state('');
+  let removalPending = $state(false);
+  let destructiveLauncher = $state<HTMLButtonElement>();
+  let destructiveSafeAction = $state<HTMLButtonElement>();
+  let destructiveDialog = $state<HTMLDivElement>();
 
   let newReservationName = $state('');
   let newReservationReason = $state('');
   let reservationError = $state('');
 
-  function openReleaseModal(name: string) {
+  function openReleaseModal(name: string, launcher: HTMLButtonElement) {
+    destructiveLauncher = launcher;
     releaseTarget = name;
     releaseReason = '';
     releaseError = '';
+    void tick().then(() => destructiveSafeAction?.focus());
+  }
+
+  function openReservationRemoval(name: string, launcher: HTMLButtonElement) {
+    destructiveLauncher = launcher;
+    reservationRemovalTarget = name;
+    removalError = '';
+    void tick().then(() => destructiveSafeAction?.focus());
+  }
+
+  function closeDestructiveDialog(kind: 'release' | 'reservation') {
+    if (releasePending || removalPending) return;
+    if (kind === 'release') releaseTarget = null;
+    else reservationRemovalTarget = null;
+    void tick().then(() => destructiveLauncher?.focus());
+  }
+
+  function handleDestructiveKeydown(event: KeyboardEvent, pending: boolean) {
+    if (event.key === 'Escape') {
+      if (!pending) { event.preventDefault(); closeDestructiveDialog(releaseTarget ? 'release' : 'reservation'); }
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    event.preventDefault();
+    // No outside-click dismissal. Pending requests keep focus on the dialog; idle Tab/Shift+Tab
+    // cycles through its safe cancel, destructive action, and any required reason input.
+    destructiveDialog?.focus();
   }
 
   async function confirmForceRelease() {
-    if (!releaseTarget || !releaseReason) return;
+    if (!releaseTarget || !releaseReason || releasePending) return;
+    releasePending = true;
+    releaseError = '';
+    void tick().then(() => destructiveDialog?.focus());
+    try {
     const response = await fetch('/api/admin/force-release', {
       method: 'POST',
       body: JSON.stringify({ name: releaseTarget, reason: releaseReason })
@@ -1188,6 +1228,10 @@ git commit -m "feat: add /admin load guard"
     } else {
       const body = await response.json().catch(() => ({ error: 'unknown_error' }));
       releaseError = body.error;
+    }
+    } finally {
+      releasePending = false;
+      if (releaseError) void tick().then(() => destructiveSafeAction?.focus());
     }
   }
 
@@ -1215,10 +1259,20 @@ git commit -m "feat: add /admin load guard"
     }
   }
 
-  async function removeReservation(name: string) {
-    const response = await fetch(`/api/admin/reservations/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    if (response.status === 200) {
-      reservations = reservations.filter((r) => r.name !== name);
+  async function confirmReservationRemoval() {
+    if (!reservationRemovalTarget || removalPending) return;
+    removalPending = true;
+    removalError = '';
+    void tick().then(() => destructiveDialog?.focus());
+    try {
+      const response = await fetch(`/api/admin/reservations/${encodeURIComponent(reservationRemovalTarget)}`, { method: 'DELETE' });
+      if (response.status === 200) {
+        reservations = reservations.filter((row) => row.name !== reservationRemovalTarget);
+        reservationRemovalTarget = null;
+      } else removalError = (await response.json().catch(() => ({ error: 'Could not remove the reservation.' }))).error;
+    } finally {
+      removalPending = false;
+      if (removalError) void tick().then(() => destructiveSafeAction?.focus());
     }
   }
 </script>
@@ -1235,7 +1289,7 @@ git commit -m "feat: add /admin load guard"
           <td>{row.name}</td>
           <td>{row.ownerPubkey}</td>
           <td>{new Date(row.lastIdentifiedAt).toLocaleDateString()}</td>
-          <td><button onclick={() => openReleaseModal(row.name)}>Force release</button></td>
+          <td><button onclick={(event) => openReleaseModal(row.name, event.currentTarget)}>Force release</button></td>
         </tr>
       {/each}
     </tbody>
@@ -1252,7 +1306,7 @@ git commit -m "feat: add /admin load guard"
           <td>{row.name}</td>
           <td>{row.reason}</td>
           <td>{row.actorPubkey}</td>
-          <td><button onclick={() => removeReservation(row.name)}>Remove</button></td>
+          <td><button onclick={(event) => openReservationRemoval(row.name, event.currentTarget)}>Remove</button></td>
         </tr>
       {/each}
     </tbody>
@@ -1270,16 +1324,27 @@ git commit -m "feat: add /admin load guard"
 </CredentialCard>
 
 {#if releaseTarget}
-  <div class="modal" role="dialog" aria-modal="true">
+  <div bind:this={destructiveDialog} class="modal" role="dialog" aria-modal="true" tabindex="-1" onkeydown={(event) => handleDestructiveKeydown(event, releasePending)}>
     <div class="modal__content">
       <p>Force-releasing {releaseTarget} makes it available for anyone else to claim. This cannot be undone.</p>
       <label for="release-reason">Reason (required)</label>
       <input id="release-reason" bind:value={releaseReason} />
-      <button onclick={confirmForceRelease} disabled={!releaseReason}>Force release {releaseTarget}</button>
-      <button onclick={() => (releaseTarget = null)}>Cancel</button>
+      <button onclick={confirmForceRelease} disabled={!releaseReason || releasePending}>Force release {releaseTarget}</button>
+      <button bind:this={destructiveSafeAction} onclick={() => closeDestructiveDialog('release')} disabled={releasePending}>Cancel</button>
       {#if releaseError}
         <p class="error" role="alert">{releaseError}</p>
       {/if}
+    </div>
+  </div>
+{/if}
+
+{#if reservationRemovalTarget}
+  <div bind:this={destructiveDialog} class="modal" role="dialog" aria-modal="true" tabindex="-1" onkeydown={(event) => handleDestructiveKeydown(event, removalPending)}>
+    <div class="modal__content">
+      <p>Remove reservation for {reservationRemovalTarget}? This makes the name claimable.</p>
+      {#if removalError}<p class="error" role="alert">{removalError}</p>{/if}
+      <button onclick={confirmReservationRemoval} disabled={removalPending}>{removalPending ? 'Removing…' : 'Remove reservation'}</button>
+      <button bind:this={destructiveSafeAction} onclick={() => closeDestructiveDialog('reservation')} disabled={removalPending}>Cancel</button>
     </div>
   </div>
 {/if}

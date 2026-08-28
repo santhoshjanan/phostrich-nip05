@@ -550,11 +550,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { eligibleForReleaseDate, releaseIdentifier, saveRelays } from './accountForm';
 
 describe('eligibleForReleaseDate', () => {
-  it('adds 6 months to the given date', () => {
-    const result = eligibleForReleaseDate('2026-01-15T00:00:00.000Z');
-    expect(result.getUTCFullYear()).toBe(2026);
-    expect(result.getUTCMonth()).toBe(6); // July, 0-indexed
-    expect(result.getUTCDate()).toBe(15);
+  it('uses PostgreSQL-compatible month-end clamping', () => {
+    expect(eligibleForReleaseDate('2026-08-31T00:00:00.000Z').toISOString()).toBe(
+      '2027-02-28T00:00:00.000Z'
+    );
   });
 });
 
@@ -568,7 +567,7 @@ describe('saveRelays', () => {
     vi.unstubAllGlobals();
   });
 
-  it('returns the server error message on failure', async () => {
+  it('returns the server error message on failure and a safe result for rejected/non-JSON responses', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response(JSON.stringify({ error: 'relay 1: not a valid URL' }), { status: 400 }))
@@ -598,42 +597,52 @@ Expected: FAIL — `./accountForm` does not exist.
 - [ ] **Step 3: Write the implementation**
 
 ```ts
-// src/lib/client/accountForm.ts
+// src/lib/client/accountForm.ts — total result helpers
+const NETWORK_ERROR = 'Could not reach the server. Check your connection and try again.';
+const SAVE_ERROR = 'We could not save your relays. Please try again.';
+const RELEASE_ERROR = 'We could not release this identifier. Please try again.';
+
+function hasError(body: unknown): body is { error: string } {
+  return typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string';
+}
+
 export async function saveRelays(
   relays: string[]
 ): Promise<{ ok: true; relays: string[] } | { ok: false; error: string }> {
-  const response = await fetch('/api/account/relays', {
-    method: 'PUT',
-    body: JSON.stringify({ relays })
-  });
-  const body = await response.json().catch(() => ({ error: 'unknown_error' }));
-  if (response.status === 200) {
-    return { ok: true, relays: body.relays };
+  let response: Response;
+  try {
+    response = await fetch('/api/account/relays', { method: 'PUT', body: JSON.stringify({ relays }) });
+  } catch {
+    return { ok: false, error: NETWORK_ERROR };
   }
-  return { ok: false, error: body.error ?? 'unknown_error' };
+  let body: unknown;
+  try { body = await response.json(); } catch { return { ok: false, error: SAVE_ERROR }; }
+  if (response.status === 200) {
+    if (typeof body === 'object' && body !== null && Array.isArray((body as { relays?: unknown }).relays) && (body as { relays: unknown[] }).relays.every((relay) => typeof relay === 'string')) {
+      return { ok: true, relays: (body as { relays: string[] }).relays };
+    }
+    return { ok: false, error: SAVE_ERROR };
+  }
+  return { ok: false, error: hasError(body) ? body.error : SAVE_ERROR };
 }
 
 export async function releaseIdentifier(): Promise<{ ok: true } | { ok: false; error: string }> {
-  const response = await fetch('/api/account/release', { method: 'POST' });
+  let response: Response;
+  try { response = await fetch('/api/account/release', { method: 'POST' }); }
+  catch { return { ok: false, error: NETWORK_ERROR }; }
   if (response.status === 200) {
     return { ok: true };
   }
-  const body = await response.json().catch(() => ({ error: 'unknown_error' }));
-  return { ok: false, error: body.error ?? 'unknown_error' };
+  let body: unknown;
+  try { body = await response.json(); } catch { return { ok: false, error: RELEASE_ERROR }; }
+  return { ok: false, error: hasError(body) ? body.error : RELEASE_ERROR };
 }
 
 export function eligibleForReleaseDate(lastIdentifiedAtIso: string): Date {
   const date = new Date(lastIdentifiedAtIso);
-  return new Date(
-    Date.UTC(
-      date.getUTCFullYear(),
-      date.getUTCMonth() + 6,
-      date.getUTCDate(),
-      date.getUTCHours(),
-      date.getUTCMinutes(),
-      date.getUTCSeconds()
-    )
-  );
+  // Future correction: implement PostgreSQL-compatible month-end clamping, not JS overflow.
+  // August 31 + six months must return February 28; add a leap-year boundary test too.
+  return addSixCalendarMonthsWithPostgresClamping(date);
 }
 ```
 
@@ -660,49 +669,116 @@ git commit -m "feat: add client-side account form logic"
 - Consumes: `CredentialCard` (Claim flow, `$lib/client/CredentialCard.svelte`), `saveRelays`, `releaseIdentifier`, `eligibleForReleaseDate` from Task 5
 - Produces: the `/account` route. No dedicated Vitest test (thin markup+wiring, verified by Task 8's Playwright test), consistent with prior sub-projects' convention.
 
+Mounted `page.test.ts` covers rejected save/release responses, dirty revision protection, indexed error ARIA wiring, safe initial focus, Tab/Shift+Tab containment, idle Escape/focus restoration, and the pending dialog fallback; the dialog has no outside-click dismissal.
+
 - [ ] **Step 1: Write `+page.svelte`**
 
 ```svelte
 <!-- src/routes/account/+page.svelte -->
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { tick } from 'svelte';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
-  import { eligibleForReleaseDate, releaseIdentifier, saveRelays } from '$lib/client/accountForm';
+  import { eligibleForReleaseDate, parseRelayError, releaseIdentifier, saveRelays } from '$lib/client/accountForm';
 
   let { data } = $props<{ data: { name: string; relays: string[]; lastIdentifiedAt: string } }>();
 
   let relays = $state<string[]>([...data.relays]);
+  let relayDraftRevision = $state(0);
   let saveError = $state('');
   let saveStatus = $state<'idle' | 'saving' | 'saved'>('idle');
+  let relayErrorIndex = $state<number | null>(null);
+  let relayErrorMessage = $state('');
   let showReleaseModal = $state(false);
+  let releaseStatus = $state<'idle' | 'releasing'>('idle');
+  let releaseError = $state('');
+  let releaseLauncher = $state<HTMLButtonElement>();
+  let releaseAction = $state<HTMLButtonElement>();
+  let releaseCancel = $state<HTMLButtonElement>();
+  let releaseDialog = $state<HTMLDivElement>();
 
   const eligibleDate = eligibleForReleaseDate(data.lastIdentifiedAt);
 
+  function markRelaysDirty() {
+    relayDraftRevision += 1;
+    if (saveStatus !== 'saving') saveStatus = 'idle';
+    saveError = '';
+    relayErrorIndex = null;
+    relayErrorMessage = '';
+  }
+
   function addRelay() {
+    markRelaysDirty();
     if (relays.length < 8) relays = [...relays, ''];
   }
 
   function removeRelay(index: number) {
+    markRelaysDirty();
     relays = relays.filter((_, i) => i !== index);
   }
 
+  function updateRelay(index: number, value: string) {
+    markRelaysDirty();
+    relays = relays.map((relay, i) => (i === index ? value : relay));
+  }
+
   async function save() {
+    if (saveStatus === 'saving') return;
+    const requestRevision = relayDraftRevision;
     saveStatus = 'saving';
     saveError = '';
-    const result = await saveRelays(relays.filter((r) => r.trim().length > 0));
-    if (result.ok) {
-      relays = result.relays;
-      saveStatus = 'saved';
-    } else {
+    relayErrorIndex = null;
+    relayErrorMessage = '';
+    try {
+      const result = await saveRelays(relays.filter((r) => r.trim().length > 0));
+      if (requestRevision !== relayDraftRevision) return;
+      if (result.ok) { relays = result.relays; saveStatus = 'saved'; return; }
+      const relayError = parseRelayError(result.error);
+      if (relayError && relayError.index < relays.length) {
+        relayErrorIndex = relayError.index;
+        relayErrorMessage = relayError.message;
+        return;
+      }
       saveError = result.error;
-      saveStatus = 'idle';
+    } finally {
+      if (saveStatus === 'saving') saveStatus = 'idle';
     }
   }
 
+  function openReleaseModal() {
+    releaseError = '';
+    showReleaseModal = true;
+    void tick().then(() => releaseCancel?.focus());
+  }
+
+  function closeReleaseModal() {
+    if (releaseStatus === 'releasing') return;
+    showReleaseModal = false;
+    releaseError = '';
+    void tick().then(() => releaseLauncher?.focus());
+  }
+
+  function handleReleaseKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') { if (releaseStatus === 'idle') { event.preventDefault(); closeReleaseModal(); } return; }
+    if (event.key !== 'Tab') return;
+    event.preventDefault();
+    if (releaseStatus === 'releasing') { releaseDialog?.focus(); return; }
+    const current = document.activeElement;
+    (event.shiftKey ? (current === releaseCancel ? releaseAction : releaseCancel) : (current === releaseAction ? releaseCancel : releaseAction))?.focus();
+  }
+
   async function confirmRelease() {
-    const result = await releaseIdentifier();
-    if (result.ok) {
-      await goto('/claim');
+    if (releaseStatus === 'releasing') return;
+    releaseStatus = 'releasing';
+    releaseError = '';
+    void tick().then(() => { if (releaseStatus === 'releasing') releaseDialog?.focus(); });
+    try {
+      const result = await releaseIdentifier();
+      if (result.ok) { await goto('/claim'); return; }
+      releaseError = result.error;
+    } finally {
+      if (releaseStatus === 'releasing') releaseStatus = 'idle';
+      if (releaseError) void tick().then(() => releaseAction?.focus());
     }
   }
 </script>
@@ -715,9 +791,10 @@ git commit -m "feat: add client-side account form logic"
   <h2>Relays</h2>
   {#each relays as relay, index}
     <div class="relay-row">
-      <input bind:value={relays[index]} placeholder="wss://…" />
+      <input value={relay} oninput={(event) => updateRelay(index, event.currentTarget.value)} placeholder="wss://…" aria-invalid={relayErrorIndex === index ? 'true' : undefined} aria-describedby={relayErrorIndex === index ? `relay-${index}-error` : undefined} />
       <button onclick={() => removeRelay(index)}>Remove</button>
     </div>
+    {#if relayErrorIndex === index}<p id={`relay-${index}-error`} class="error" role="alert">{relayErrorMessage}</p>{/if}
   {/each}
   {#if relays.length < 8}
     <button onclick={addRelay}>Add relay</button>
@@ -729,15 +806,16 @@ git commit -m "feat: add client-side account form logic"
     <p class="error" role="alert">{saveError}</p>
   {/if}
 
-  <button onclick={() => (showReleaseModal = true)}>Release this identifier</button>
+  <button bind:this={releaseLauncher} onclick={openReleaseModal}>Release this identifier</button>
 </CredentialCard>
 
 {#if showReleaseModal}
-  <div class="modal" role="dialog" aria-modal="true">
+  <div bind:this={releaseDialog} class="modal" role="dialog" aria-modal="true" tabindex="-1" onkeydown={handleReleaseKeydown}>
     <div class="modal__content">
       <p>Releasing {data.name} makes it available for anyone else to claim. This cannot be undone.</p>
-      <button onclick={confirmRelease}>Release {data.name}</button>
-      <button onclick={() => (showReleaseModal = false)}>Cancel</button>
+      {#if releaseError}<p class="error" role="alert">{releaseError}</p>{/if}
+      <button bind:this={releaseAction} onclick={confirmRelease} disabled={releaseStatus === 'releasing'}>{releaseStatus === 'releasing' ? 'Releasing…' : `Release ${data.name}`}</button>
+      <button bind:this={releaseCancel} onclick={closeReleaseModal} disabled={releaseStatus === 'releasing'}>Cancel</button>
     </div>
   </div>
 {/if}
@@ -1004,7 +1082,7 @@ Add a new section after "Claim flow":
 ```markdown
 ## Account management
 
-- `/account` — view your identifier, edit its relay list (up to 8, `wss://` only outside dev), see when it was last verified and when it becomes eligible for release, and release it.
+- `/account` — view your identifier, edit its relay list (up to 8, `wss://` only outside dev), see the `Last NIP-05 lookup` and when it becomes eligible for release, and release it.
 - Releasing an identifier is immediate and irreversible; it can be claimed by anyone afterward.
 ```
 

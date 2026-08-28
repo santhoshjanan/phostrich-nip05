@@ -6,7 +6,8 @@ import { valkey } from '../valkey';
 import { claimIdentifier } from './claim';
 
 const TEST_NAME = 'claim-test-name';
-const TEST_OWNER = '1'.repeat(64);
+const TEST_OWNER = 'cd'.repeat(32);
+const TAKEN_OWNER = 'ab'.repeat(32);
 
 describe('claimIdentifier', () => {
   afterEach(async () => {
@@ -24,7 +25,10 @@ describe('claimIdentifier', () => {
     const [row] = await db.select().from(identifiers).where(eq(identifiers.name, TEST_NAME));
     expect(row.ownerPubkey).toBe(TEST_OWNER);
 
-    const [event] = await db.select().from(identifierEvents).where(eq(identifierEvents.identifierName, TEST_NAME));
+    const [event] = await db
+      .select()
+      .from(identifierEvents)
+      .where(eq(identifierEvents.identifierName, TEST_NAME));
     expect(event.eventType).toBe('claimed');
     expect(event.actorPubkey).toBe(TEST_OWNER);
 
@@ -37,14 +41,18 @@ describe('claimIdentifier', () => {
   });
 
   it('rejects a name that is already taken', async () => {
-    await db.insert(identifiers).values({ name: TEST_NAME, status: 'claimed', ownerPubkey: '2'.repeat(64) });
+    await db
+      .insert(identifiers)
+      .values({ name: TEST_NAME, status: 'claimed', ownerPubkey: TAKEN_OWNER });
     const result = await claimIdentifier(TEST_NAME, TEST_OWNER);
     expect(result).toEqual({ ok: false, reason: 'name_taken' });
   });
 
   it('rejects a second claim by an owner who already has one', async () => {
     const otherName = 'claim-test-existing';
-    await db.insert(identifiers).values({ name: otherName, status: 'claimed', ownerPubkey: TEST_OWNER });
+    await db
+      .insert(identifiers)
+      .values({ name: otherName, status: 'claimed', ownerPubkey: TEST_OWNER });
 
     try {
       const result = await claimIdentifier(TEST_NAME, TEST_OWNER);

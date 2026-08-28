@@ -256,7 +256,11 @@
         <p class="error" role="alert">{releaseError}</p>
       {/if}
       <div class="modal__actions">
-        <button bind:this={releaseAction} onclick={confirmRelease} disabled={releaseStatus === 'releasing'}>
+        <button
+          bind:this={releaseAction}
+          onclick={confirmRelease}
+          disabled={releaseStatus === 'releasing'}
+        >
           {releaseStatus === 'releasing' ? 'Releasing…' : `Release ${data.name}`}
         </button>
         <button

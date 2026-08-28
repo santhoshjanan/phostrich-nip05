@@ -4,17 +4,17 @@
 @import '@fontsource/jetbrains-mono/500.css';
 
 :root {
-  --color-canvas: #f5f3f8;      /* pale lavender-white ledger ground */
-  --color-ink: #2e2a33;         /* soft charcoal-plum body text */
-  --color-line: #cfc9d6;        /* hairline rule / border */
+  --color-canvas: #f5f3f8; /* pale lavender-white ledger ground */
+  --color-ink: #2e2a33; /* soft charcoal-plum body text */
+  --color-line: #cfc9d6; /* hairline rule / border */
   --color-accent-mint: #a8d8c9; /* available / success — sage-mint */
   --color-accent-rose: #e8b4bc; /* unavailable / void — dusty rose */
   --color-accent-mint-text: #2f6b52; /* deep pine, same hue family as mint, for text use (5.70:1 on canvas) */
   --color-accent-rose-text: #9c4a5c; /* deep berry, same hue family as rose, for text use (5.37:1 on canvas) */
   --color-ink-muted: #6b6572; /* muted secondary text — border/rule color stays --color-line (5.11:1 on canvas) */
 
-  --font-display: 'Source Serif 4', serif;   /* identifier name only */
-  --font-mono: 'JetBrains Mono', monospace;  /* pubkeys/timestamps/technical only */
+  --font-display: 'Source Serif 4', serif; /* identifier name only */
+  --font-mono: 'JetBrains Mono', monospace; /* pubkeys/timestamps/technical only */
   --font-ui: -apple-system, 'Segoe UI', system-ui, sans-serif; /* buttons/labels/body */
 
   --space-1: 0.5rem;
@@ -82,7 +82,9 @@ input:not([type]) {
   background: white;
   color: var(--color-ink);
   width: 100%;
-  transition: border-color 0.15s ease, outline-color 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    outline-color 0.15s ease;
 }
 
 input[type='text']:focus,
@@ -106,7 +108,9 @@ button {
   font-family: var(--font-ui);
   font-size: 0.95rem;
   cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 button:hover:not(:disabled) {

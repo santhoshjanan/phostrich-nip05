@@ -76,7 +76,9 @@ describe('config', () => {
       ADMIN_PUBKEYS: '6A04AB98D9E4774AD806E302DDDEB63BEA16B5CB5F223EE77478E861BB583EB3'
     });
     const { config } = await import('./config?t=' + Date.now());
-    expect(config.ADMIN_PUBKEYS).toEqual(['0000000000000000000000000000000000000000000000000000000000000000']);
+    expect(config.ADMIN_PUBKEYS).toEqual([
+      '0000000000000000000000000000000000000000000000000000000000000000'
+    ]);
   });
 
   it('rejects invalid ADMIN_PUBKEYS entries', async () => {

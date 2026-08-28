@@ -200,7 +200,12 @@ describe('invalidateIdentifier', () => {
   });
 
   it('removes a cached entry', async () => {
-    await valkey.set('identifier:' + NAME, JSON.stringify({ pubkey: 'a'.repeat(64), relays: [] }), 'EX', 300);
+    await valkey.set(
+      'identifier:' + NAME,
+      JSON.stringify({ pubkey: 'a'.repeat(64), relays: [] }),
+      'EX',
+      300
+    );
     await invalidateIdentifier(NAME);
     expect(await valkey.get('identifier:' + NAME)).toBeNull();
   });

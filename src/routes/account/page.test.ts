@@ -321,7 +321,10 @@ describe('account release dialog', () => {
   });
 
   it('keeps the dialog usable after a rejected release request', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('network detail'))));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Promise.reject(new TypeError('network detail')))
+    );
     renderAccount();
 
     button('Release this identifier').click();

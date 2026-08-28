@@ -16,6 +16,6 @@ export const load: PageServerLoad = async ({ locals }) => {
     .limit(1);
 
   if (existing) {
-    redirect(302, '/claimed');
+    redirect(302, '/account');
   }
 };

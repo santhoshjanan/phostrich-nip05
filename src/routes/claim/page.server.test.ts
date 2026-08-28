@@ -21,11 +21,11 @@ describe('claim page load', () => {
     await expect(load(loadEvent(null))).rejects.toMatchObject({ status: 302, location: '/login' });
   });
 
-  it('redirects to /claimed when the user already owns a claimed identifier', async () => {
+  it('redirects to /account when the user already owns a claimed identifier', async () => {
     await db.insert(identifiers).values({ name: TEST_NAME, status: 'claimed', ownerPubkey: TEST_OWNER });
     await expect(load(loadEvent({ pubkey: TEST_OWNER }))).rejects.toMatchObject({
       status: 302,
-      location: '/claimed'
+      location: '/account'
     });
   });
 

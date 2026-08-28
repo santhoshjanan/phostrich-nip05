@@ -12,23 +12,25 @@ Sub-project 5 of the Phostrich build order (see `docs/SPEC.md` for full product/
 - Extending `identifierEventType` with `'reserved'` and `'reservation_removed'`
 
 **Explicitly out of scope:**
-- Any background job — the staleness report is a **live query**, not fed by a scheduled job. Whether sub-project 6 still needs one at all (its other original purpose, the warning DM, was already cut) is that sub-project's own question, not decided here.
+- Any background job — the staleness report is a **live query**, not fed by a scheduled job. There is no warning channel, materialized report, or automatic release for a scan to produce.
 - CI/CD — sub-project 6.
 
 ## Auth guard
 
-`ADMIN_PUBKEYS` — new `Config` field: comma-separated hex, same parsing pattern as `DEFAULT_RELAYS`. `isAdmin(pubkey: string): boolean` checks membership.
+`ADMIN_PUBKEYS` — new `Config` field: comma-separated lowercase hex, same parsing pattern as `DEFAULT_RELAYS`. `isAdmin(pubkey: string): boolean` checks membership. `.env.example` intentionally leaves the allowlist empty; production operators must supply their own pubkeys.
 
 `/admin`'s load: unauthenticated → redirect `/login`. Authenticated but not admin → `403` (a plain access-control failure, not a disguising redirect — standard and honest, and there's no reason to hide that the route exists from an authenticated non-admin).
 
 ## Routes and endpoints
 
+All three write routes are thin adapters: authenticate, parse request shape, call a focused operation in `src/lib/server/identifiers/`, and map its discriminated result to HTTP. Validation, normalization, transactions, audit writes, conflict inspection, and cache invalidation remain inside the server service layer.
+
 - **`/admin`** — server `load` runs two live queries:
-  - Staleness: `identifiers` where `status = 'claimed'` and `last_identified_at` older than 6 months, sorted oldest-first.
-  - Reservations: `identifiers` where `status = 'reserved'`.
-- **`POST /api/admin/reservations`** — admin only. Body `{name, reason}`. Validates via `isValidNameFormat` only — **not** the reserved-pattern blocklist, since an admin reservation is a distinct, complementary mechanism (an admin can reserve a name that isn't pattern-blocked at all, e.g. for a trademark holder). Inserts the row (`status: 'reserved'`, no owner) plus an `identifier_events` row (`eventType: 'reserved'`, the given `reason`). `409` if the name already has any row — specifically stating why (claimed vs. already reserved), since an admin already sees the full picture in the report; the project's "don't reveal more than necessary" principle protects against strangers probing the system, not trusted admins using it.
-- **`DELETE /api/admin/reservations/[name]`** — admin only. Deletes only if `status = 'reserved'` (the query is scoped so it can never delete a claimed row), writes `eventType: 'reservation_removed'`. `404` if no matching reserved row exists.
-- **`POST /api/admin/force-release`** — admin only. Body `{name, reason}` — **reason required**, per `docs/SPEC.md`. Re-verifies staleness server-side inside the same transaction before deleting, rather than trusting a possibly-stale report snapshot the admin is looking at — defends against a race where the owner re-verifies their identifier right as the admin acts. On success: delete the row, insert `eventType: 'force_released'` (with the reason), invalidate the cache. `409` with a specific "no longer eligible, last verified `<date>`" message if the re-check finds it's not actually stale anymore.
+  - Staleness: `identifiers` where `status = 'claimed'` and the shared `staleIdentifierCondition()` is true, sorted by oldest lookup and then name. The condition is PostgreSQL calendar arithmetic: `last_identified_at + interval '6 months' < now()`. August 31 plus six months is February 28, so subtracting six months is not equivalent.
+  - Reservations: `identifiers` where `status = 'reserved'`, with the latest `reserved` event selected in the same deterministic database statement by `created_at DESC, id DESC`. This avoids an N+1 query and keeps row plus audit metadata on one statement snapshot, including remove/recreate histories.
+- **`POST /api/admin/reservations`** — admin only. Body `{name, reason}`. Validates via `isValidNameFormat` only — **not** the reserved-pattern blocklist, since an admin reservation is a distinct, complementary mechanism (an admin can reserve a name that isn't pattern-blocked at all, e.g. for a trademark holder). Trims the reason, rejects it when empty after trimming, and persists the trimmed value. Inserts the row (`status: 'reserved'`, no owner) plus an `identifier_events` row (`eventType: 'reserved'`, the normalized reason), then returns the normalized name/reason with the acting pubkey and database creation timestamp so the live table is complete immediately. `409` if the name already has any row — specifically stating why (claimed vs. already reserved), since an admin already sees the full picture in the report; the project's "don't reveal more than necessary" principle protects against strangers probing the system, not trusted admins using it.
+- **`DELETE /api/admin/reservations/[name]`** — admin only. One transaction conditionally deletes only a `status = 'reserved'` row (so it can never delete a claimed row) and, only when it returns a row, inserts `reservation_removed`. `404` if no matching reserved row exists; no audit row is written then.
+- **`POST /api/admin/force-release`** — admin only. Body `{name, reason}` — **reason required**, per `docs/SPEC.md`. The service trims the reason, rejects it when empty after trimming, and persists the trimmed value. One transaction conditionally deletes a claimed row using the shared `staleIdentifierCondition()` and inserts `force_released` only when that delete returns a row. It rechecks present eligibility rather than trusting the report snapshot; a zero-row outcome writes no event and maps to 404 or a specific 409. Cache invalidation is fail-open after commit.
 
 ## Data model
 
@@ -48,10 +50,14 @@ Extends Issued Credential, no new concept round (per Impeccable's "extend an exi
 
 - The report becomes **ruled rows** — each record its own ruled table row, the tabular counterpart to the single-record ruled-field pattern already used on `/account`.
 - The reservation add-form reuses that same ruled-field pattern (one fact per ruled line, as elsewhere).
-- Force-release and reservation-remove both use the existing hard-interrupt modal pattern (claim policy, account release). Force-release's modal includes the required reason field itself, not a separate step.
-- No new colors, no new type, no new restraint discipline — same navy/cream/oxblood, same single-hairline-accent rule.
+- Force-release and reservation-remove both use the existing hard-interrupt modal pattern (claim policy, account release): safe initial focus, Tab/Shift+Tab containment, idle-only Escape, and focus restoration after close or failure. Force-release's modal includes the required reason field itself, not a separate step.
+- Each destructive dialog has a visible action heading and consequence description wired through `aria-labelledby` and `aria-describedby`; its accessible name includes the affected identifier.
+- Repeated row actions have target-specific accessible names, pending dialogs expose `aria-busy` and retain a visible mint focus treatment, successful reservation creation is announced through the page's polite live region, and compact actions keep a 44px coarse-pointer hit area.
+- No new colors, no new type, no new restraint discipline — use the canonical `--color-canvas`, `--color-ink`, `--color-line`, `--color-paper`, `--color-accent-rose-text`, and `--font-ui` tokens from `DESIGN.md`.
 
 ## Error handling
+
+The three Admin client write helpers are typed and total. Request rejection, malformed success bodies, and unusable error bodies resolve to operation-specific safe errors. Each caller prevents double submission, exposes a pending state, and restores an idle usable state in a finalizer.
 
 - Non-admin authenticated → `403`.
 - Reservation create: format-invalid → `400` (specific); name conflict → `409` (specific).
@@ -64,5 +70,6 @@ Extends Issued Credential, no new concept round (per Impeccable's "extend an exi
 - `config.ts`'s `ADMIN_PUBKEYS` parsing, `isAdmin()` — unit tests.
 - The `isClaimableName` split: `isValidNameFormat` gets its own tests; Claim flow's existing `isClaimableName` tests must keep passing unchanged.
 - All four backend surfaces: admin guard (403/redirect), happy path, each conflict/validation case — real Postgres, no mocks, same as every prior sub-project.
-- **E2E environment note**: the existing e2e tests generate a fresh random keypair per run, but an admin e2e test needs its pubkey already present in `.env`'s `ADMIN_PUBKEYS` before the server starts. This test therefore needs a **fixed, checked-in test keypair** rather than a random one, with that specific pubkey added to `.env.example`'s `ADMIN_PUBKEYS`. Called out explicitly here so it isn't a mysterious e2e failure at implementation time.
+- Integration suites use seed-audited owner pubkeys unique to each file and assert only rows owned by their fixture names, so parallel execution cannot collide with the claimed-owner unique index or unrelated live report rows.
+- **E2E environment note**: the existing e2e tests generate a fresh random keypair per run, but an admin e2e test needs a configured pubkey before the server starts. The Admin suite therefore uses a **fixed, checked-in test keypair**, while `playwright.config.ts` injects its derived pubkey into both the Playwright worker and preview-server environments. `.env.example` never grants that public test identity. Fixture names are deterministic hashes of test id, retry, and worker, with an explicit 30-character/format precondition.
 - 90% coverage gate applies; `.svelte` files stay excluded, same convention as every prior sub-project.

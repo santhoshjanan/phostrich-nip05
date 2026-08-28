@@ -56,16 +56,24 @@ describe('one identifier per owner', () => {
 
   it('rejects a second claimed row for the same owner_pubkey', async () => {
     const owner = randomPubkey();
-    await db.insert(identifiers).values({ name: 'owner-cap-test-1', status: 'claimed', ownerPubkey: owner });
+    await db
+      .insert(identifiers)
+      .values({ name: 'owner-cap-test-1', status: 'claimed', ownerPubkey: owner });
     await expect(
-      db.insert(identifiers).values({ name: 'owner-cap-test-2', status: 'claimed', ownerPubkey: owner })
+      db
+        .insert(identifiers)
+        .values({ name: 'owner-cap-test-2', status: 'claimed', ownerPubkey: owner })
     ).rejects.toThrow();
   });
 
   it('allows the same owner_pubkey on a non-claimed row', async () => {
     const owner = randomPubkey();
-    await db.insert(identifiers).values({ name: 'owner-cap-test-3', status: 'claimed', ownerPubkey: owner });
-    await db.insert(identifiers).values({ name: 'owner-cap-test-4', status: 'reserved', ownerPubkey: owner });
+    await db
+      .insert(identifiers)
+      .values({ name: 'owner-cap-test-3', status: 'claimed', ownerPubkey: owner });
+    await db
+      .insert(identifiers)
+      .values({ name: 'owner-cap-test-4', status: 'reserved', ownerPubkey: owner });
   });
 });
 
@@ -103,7 +111,10 @@ describe('identifier events for reservations', () => {
       reason: 'trademark hold'
     });
 
-    const [row] = await db.select().from(identifierEvents).where(eq(identifierEvents.identifierName, name));
+    const [row] = await db
+      .select()
+      .from(identifierEvents)
+      .where(eq(identifierEvents.identifierName, name));
     expect(row).toMatchObject({ eventType: 'reserved', reason: 'trademark hold' });
   });
 });

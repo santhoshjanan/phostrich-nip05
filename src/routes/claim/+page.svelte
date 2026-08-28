@@ -2,7 +2,12 @@
   import { goto } from '$app/navigation';
   import { fade, scale } from 'svelte/transition';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
-  import { checkAvailability, debounce, submitClaim, type AvailabilityState } from '$lib/client/claimForm';
+  import {
+    checkAvailability,
+    debounce,
+    submitClaim,
+    type AvailabilityState
+  } from '$lib/client/claimForm';
 
   let name = $state('');
   let availability = $state<AvailabilityState>('idle');
@@ -65,7 +70,13 @@
 
 <CredentialCard title="Claim your identifier">
   <label for="name" class="ledger-label">Identifier name</label>
-  <input id="name" class="identifier-input" bind:value={name} oninput={handleInput} placeholder="alice" />
+  <input
+    id="name"
+    class="identifier-input"
+    bind:value={name}
+    oninput={handleInput}
+    placeholder="alice"
+  />
 
   {#if availability !== 'idle'}
     <div class="ledger-row">
@@ -88,7 +99,9 @@
 
   {#if submitError}
     <p class="error" role="alert">
-      {submitError === 'owner_cap' ? 'You already own an identifier.' : 'That name is no longer available.'}
+      {submitError === 'owner_cap'
+        ? 'You already own an identifier.'
+        : 'That name is no longer available.'}
     </p>
   {/if}
 </CredentialCard>
@@ -108,8 +121,8 @@
         <h2 id="modal-title">Before you claim</h2>
       </div>
       <p id="modal-description">
-        This identifier is automatically freed for someone else to claim after 6 months with no lookup
-        activity against it.
+        This identifier is automatically freed for someone else to claim after 6 months with no
+        lookup activity against it.
       </p>
       <button onclick={confirmClaim} disabled={isSubmitting}>I understand, claim this name</button>
       <button class="secondary" onclick={() => (showModal = false)}>Cancel</button>

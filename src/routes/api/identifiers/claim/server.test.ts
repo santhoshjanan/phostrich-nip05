@@ -46,7 +46,9 @@ describe('POST /api/identifiers/claim', () => {
   });
 
   it('returns 409 for a name that is already taken', async () => {
-    await db.insert(identifiers).values({ name: TEST_NAME, status: 'claimed', ownerPubkey: '4'.repeat(64) });
+    await db
+      .insert(identifiers)
+      .values({ name: TEST_NAME, status: 'claimed', ownerPubkey: '4'.repeat(64) });
     const response = await POST(requestEvent({ name: TEST_NAME }, { pubkey: TEST_OWNER }));
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: 'not_available' });
@@ -62,7 +64,9 @@ describe('POST /api/identifiers/claim', () => {
     const firstName = 'claim-route-owner-cap-existing';
     await valkey.del(`ratelimit:claim:pubkey:${owner}`);
     try {
-      await db.insert(identifiers).values({ name: firstName, status: 'claimed', ownerPubkey: owner });
+      await db
+        .insert(identifiers)
+        .values({ name: firstName, status: 'claimed', ownerPubkey: owner });
       const response = await POST(requestEvent({ name: TEST_NAME }, { pubkey: owner }));
       expect(response.status).toBe(409);
       expect(await response.json()).toEqual({ error: 'owner_cap' });

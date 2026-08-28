@@ -17,7 +17,9 @@ export async function checkAvailability(name: string): Promise<boolean> {
   return body.available === true;
 }
 
-export async function submitClaim(name: string): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function submitClaim(
+  name: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const response = await fetch('/api/identifiers/claim', {
     method: 'POST',
     body: JSON.stringify({ name })

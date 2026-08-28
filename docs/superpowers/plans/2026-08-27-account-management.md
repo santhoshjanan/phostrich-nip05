@@ -6,7 +6,7 @@
 
 **Goal:** Add the persistent `/account` page — relay list editing, release, and inactivity status — completing the loop the Claim flow began.
 
-**Architecture:** A pure, injectable-flag relay validator sits behind two thin routes (`PUT /api/account/relays`, `POST /api/account/release`), mirroring every prior sub-project's layering. The account page reuses the Issued Credential shell and design tokens already built; no new visual world.
+**Architecture:** `saveOwnedRelays()` and `releaseOwnedIdentifier()` in `src/lib/server/identifiers/account.ts` sit behind two thin routes (`PUT /api/account/relays`, `POST /api/account/release`). Their conditional owner/status mutations and post-commit invalidation preserve the server-layer boundary. The account page reuses the Issued Credential shell and design tokens already built; no new visual world.
 
 **Tech Stack:** SvelteKit 2, Drizzle ORM, Playwright (extending the existing e2e suite).
 
@@ -17,9 +17,11 @@
 - Privileged logic only in `src/lib/server/**`, relative imports inside it — same as every prior sub-project.
 - Relay validation: cap 8, `wss://` required (`ws://` allowed only via an explicit `allowInsecure` flag, decided by the route from `$app/environment`'s `dev`, never hardcoded inside the validator), no credentials, no query string, deduped by normalized trailing slash, order preserved.
 - Relay-edit validation errors are specific (unlike the deliberately vague claim/availability responses) — this is a user editing their own authenticated data, not a stranger probing the system.
-- Release: hard delete of the `identifiers` row + an `identifier_events` row (`eventType: 'released'`) in one transaction, then cache invalidation — no new migration needed, the enum already has this value.
-- Release confirmation: explicit modal, no outside-click dismiss, explicit affirmative action — same hard-interrupt pattern as the claim-time expiry modal, no "type the name" friction.
-- Inactivity status: always show both "last verified" and "eligible for release after" dates, same calm tone, no color escalation.
+- Relay service: validate first, then conditionally update `owner_pubkey` + `status = 'claimed'` with `RETURNING`; a zero-row result is not found and does not invalidate.
+- Release service: conditional owner/status `DELETE ... RETURNING` plus its `released` audit insertion occur in one transaction; a zero-row result writes no audit event; cache invalidation is fail-open after a successful commit.
+- Release confirmation: explicit hard-interrupt modal with safe initial focus, Tab/Shift+Tab containment, idle-only Escape, and focus restoration after Cancel, Escape, or a failed release.
+- Inactivity status: always show `Last NIP-05 lookup` and `Eligible for release after`, with calm helper copy explaining that public lookups determine eligibility.
+- Account client requests are total: network rejections, aborts, and unusable error responses become concise user-safe failures, and save/release busy states always clear. Relay `N` errors attach to their matching fields via `aria-invalid` and `aria-describedby`.
 - `/claim`'s already-owns-one redirect changes from `/claimed` to `/account` (Task 7).
 - `.svelte` files stay excluded from the Vitest coverage threshold; verified by Playwright instead. 90% coverage gate applies to everything else.
 
@@ -30,20 +32,21 @@
 ```
 src/lib/server/identifiers/
   relays.ts, relays.test.ts          — validateRelayList()
+  account.ts, account.test.ts        — saveOwnedRelays(), releaseOwnedIdentifier()
 
 src/routes/api/account/
-  relays/+server.ts, +server.test.ts
-  release/+server.ts, +server.test.ts
+  relays/+server.ts, server.test.ts
+  release/+server.ts, server.test.ts
 
 src/routes/account/
-  +page.server.ts, +page.server.test.ts
+  +page.server.ts, page.server.test.ts
   +page.svelte
 
 src/lib/client/
   accountForm.ts, accountForm.test.ts  — saveRelays(), releaseIdentifier(), eligibleForReleaseDate()
 
 src/routes/claim/+page.server.ts (modify)       — redirect target /claimed -> /account
-src/routes/claim/+page.server.test.ts (modify)
+src/routes/claim/page.server.test.ts (modify)
 
 tests/e2e/helpers/fakeSigner.ts                  — extracted from Claim flow's e2e test
 tests/e2e/claim-flow.spec.ts (modify)            — use the extracted helper
@@ -191,16 +194,16 @@ git commit -m "feat: add relay list validator"
 
 **Files:**
 - Create: `src/routes/api/account/relays/+server.ts`
-- Test: `src/routes/api/account/relays/+server.test.ts`
+- Test: `src/routes/api/account/relays/server.test.ts`
 
 **Interfaces:**
-- Consumes: `validateRelayList` from Task 1, `invalidateIdentifier` (Foundation/Claim-flow, `$lib/server/db/identifiers`), `dev` from `$app/environment`
+- Consumes: `saveOwnedRelays` from `src/lib/server/identifiers/account`, `dev` from `$app/environment`
 - Produces: `PUT: RequestHandler` — `{relays}` on 200, 400 on validation failure, 401 unauthenticated, 404 if the caller owns nothing
 
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// src/routes/api/account/relays/+server.test.ts
+// src/routes/api/account/relays/server.test.ts
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -263,21 +266,17 @@ describe('PUT /api/account/relays', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run "src/routes/api/account/relays/+server.test.ts"`
+Run: `pnpm vitest run "src/routes/api/account/relays/server.test.ts"`
 Expected: FAIL — `./+server` does not exist.
 
 - [ ] **Step 3: Write the implementation**
 
 ```ts
 // src/routes/api/account/relays/+server.ts
+import { dev } from '$app/environment';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { dev } from '$app/environment';
-import { and, eq } from 'drizzle-orm';
-import { db } from '$lib/server/db';
-import { identifiers } from '$lib/server/db/schema';
-import { invalidateIdentifier } from '$lib/server/db/identifiers';
-import { validateRelayList } from '$lib/server/identifiers/relays';
+import { saveOwnedRelays } from '$lib/server/identifiers/account';
 
 export const PUT: RequestHandler = async ({ request, locals }) => {
   if (!locals.user) {
@@ -290,41 +289,27 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
     return json({ error: 'invalid_relays' }, { status: 400 });
   }
 
-  const validation = validateRelayList(relays, { allowInsecure: dev });
-  if (!validation.ok) {
-    return json({ error: validation.error }, { status: 400 });
+  const result = await saveOwnedRelays(locals.user.pubkey, relays, { allowInsecure: dev });
+  if (!result.ok && result.reason === 'invalid_relays') {
+    return json({ error: result.error }, { status: 400 });
   }
-
-  const [existing] = await db
-    .select({ name: identifiers.name })
-    .from(identifiers)
-    .where(and(eq(identifiers.ownerPubkey, locals.user.pubkey), eq(identifiers.status, 'claimed')))
-    .limit(1);
-
-  if (!existing) {
+  if (!result.ok) {
     return json({ error: 'not_found' }, { status: 404 });
   }
 
-  await db
-    .update(identifiers)
-    .set({ relays: validation.relays, updatedAt: new Date() })
-    .where(eq(identifiers.name, existing.name));
-
-  await invalidateIdentifier(existing.name);
-
-  return json({ relays: validation.relays });
+  return json({ relays: result.relays });
 };
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm vitest run "src/routes/api/account/relays/+server.test.ts"`
-Expected: PASS (4 tests)
+Run: `pnpm vitest run "src/routes/api/account/relays/server.test.ts"`
+Expected: all route assertions in the current snippet pass.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add "src/routes/api/account/relays/+server.ts" "src/routes/api/account/relays/+server.test.ts"
+git add "src/routes/api/account/relays/+server.ts" "src/routes/api/account/relays/server.test.ts"
 git commit -m "feat: add PUT /api/account/relays"
 ```
 
@@ -334,16 +319,16 @@ git commit -m "feat: add PUT /api/account/relays"
 
 **Files:**
 - Create: `src/routes/api/account/release/+server.ts`
-- Test: `src/routes/api/account/release/+server.test.ts`
+- Test: `src/routes/api/account/release/server.test.ts`
 
 **Interfaces:**
-- Consumes: `identifierEvents`, `identifiers` (`$lib/server/db/schema`), `invalidateIdentifier` (`$lib/server/db/identifiers`)
+- Consumes: `releaseOwnedIdentifier` from `src/lib/server/identifiers/account`
 - Produces: `POST: RequestHandler` — `{ok: true}` on 200, 401 unauthenticated, 404 if the caller owns nothing
 
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// src/routes/api/account/release/+server.test.ts
+// src/routes/api/account/release/server.test.ts
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -396,7 +381,7 @@ describe('POST /api/account/release', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run "src/routes/api/account/release/+server.test.ts"`
+Run: `pnpm vitest run "src/routes/api/account/release/server.test.ts"`
 Expected: FAIL — `./+server` does not exist.
 
 - [ ] **Step 3: Write the implementation**
@@ -405,37 +390,14 @@ Expected: FAIL — `./+server` does not exist.
 // src/routes/api/account/release/+server.ts
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { and, eq } from 'drizzle-orm';
-import { db } from '$lib/server/db';
-import { identifierEvents, identifiers } from '$lib/server/db/schema';
-import { invalidateIdentifier } from '$lib/server/db/identifiers';
+import { releaseOwnedIdentifier } from '$lib/server/identifiers/account';
 
 export const POST: RequestHandler = async ({ locals }) => {
   if (!locals.user) {
     return json({ error: 'unauthenticated' }, { status: 401 });
   }
-  const ownerPubkey = locals.user.pubkey;
-
-  const [existing] = await db
-    .select({ name: identifiers.name })
-    .from(identifiers)
-    .where(and(eq(identifiers.ownerPubkey, ownerPubkey), eq(identifiers.status, 'claimed')))
-    .limit(1);
-
-  if (!existing) {
-    return json({ error: 'not_found' }, { status: 404 });
-  }
-
-  await db.transaction(async (tx) => {
-    await tx.delete(identifiers).where(eq(identifiers.name, existing.name));
-    await tx.insert(identifierEvents).values({
-      identifierName: existing.name,
-      eventType: 'released',
-      actorPubkey: ownerPubkey
-    });
-  });
-
-  await invalidateIdentifier(existing.name);
+  const result = await releaseOwnedIdentifier(locals.user.pubkey);
+  if (!result.ok) return json({ error: 'not_found' }, { status: 404 });
 
   return json({ ok: true });
 };
@@ -443,13 +405,13 @@ export const POST: RequestHandler = async ({ locals }) => {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm vitest run "src/routes/api/account/release/+server.test.ts"`
+Run: `pnpm vitest run "src/routes/api/account/release/server.test.ts"`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add "src/routes/api/account/release/+server.ts" "src/routes/api/account/release/+server.test.ts"
+git add "src/routes/api/account/release/+server.ts" "src/routes/api/account/release/server.test.ts"
 git commit -m "feat: add POST /api/account/release"
 ```
 
@@ -459,7 +421,7 @@ git commit -m "feat: add POST /api/account/release"
 
 **Files:**
 - Create: `src/routes/account/+page.server.ts`
-- Test: `src/routes/account/+page.server.test.ts`
+- Test: `src/routes/account/page.server.test.ts`
 
 **Interfaces:**
 - Consumes: `db`, `identifiers` (`$lib/server/db`, `$lib/server/db/schema`)
@@ -468,7 +430,7 @@ git commit -m "feat: add POST /api/account/release"
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// src/routes/account/+page.server.test.ts
+// src/routes/account/page.server.test.ts
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -513,7 +475,7 @@ describe('account page load', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run src/routes/account/+page.server.test.ts`
+Run: `pnpm vitest run src/routes/account/page.server.test.ts`
 Expected: FAIL — `./+page.server` does not exist.
 
 - [ ] **Step 3: Write the implementation**
@@ -555,13 +517,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm vitest run src/routes/account/+page.server.test.ts`
+Run: `pnpm vitest run src/routes/account/page.server.test.ts`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/routes/account/+page.server.ts src/routes/account/+page.server.test.ts
+git add src/routes/account/+page.server.ts src/routes/account/page.server.test.ts
 git commit -m "feat: add /account load guard"
 ```
 
@@ -577,20 +539,24 @@ git commit -m "feat: add /account load guard"
 - Consumes: nothing from earlier tasks in this plan (calls the routes from Tasks 2–3 over `fetch`)
 - Produces: `saveRelays(relays: string[]): Promise<{ok:true; relays:string[]}|{ok:false; error:string}>`, `releaseIdentifier(): Promise<{ok:true}|{ok:false; error:string}>`, `eligibleForReleaseDate(lastIdentifiedAtIso: string): Date` from `src/lib/client/accountForm.ts`
 
+**Stabilization correction:** both request helpers are total: wrap fetch and error-body decoding so rejected, aborted, and unusable responses return concise user-safe failure results. Callers use `finally`-style cleanup so busy state cannot stick.
+
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
 // src/lib/client/accountForm.test.ts
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { eligibleForReleaseDate, releaseIdentifier, saveRelays } from './accountForm';
+import { eligibleForReleaseDate, parseRelayError, releaseIdentifier, saveRelays } from './accountForm';
 
 describe('eligibleForReleaseDate', () => {
-  it('adds 6 months to the given date', () => {
-    const result = eligibleForReleaseDate('2026-01-15T00:00:00.000Z');
-    expect(result.getUTCFullYear()).toBe(2026);
-    expect(result.getUTCMonth()).toBe(6); // July, 0-indexed
-    expect(result.getUTCDate()).toBe(15);
+  it('uses PostgreSQL-compatible month-end clamping', () => {
+    expect(eligibleForReleaseDate('2026-08-31T00:00:00.000Z').toISOString()).toBe(
+      '2027-02-28T00:00:00.000Z'
+    );
+    expect(eligibleForReleaseDate('2027-08-31T00:00:00.000Z').toISOString()).toBe(
+      '2028-02-29T00:00:00.000Z'
+    );
   });
 });
 
@@ -604,13 +570,20 @@ describe('saveRelays', () => {
     vi.unstubAllGlobals();
   });
 
-  it('returns the server error message on failure', async () => {
+  it('returns the server error message on failure and a safe result for rejected/non-JSON responses', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response(JSON.stringify({ error: 'relay 1: not a valid URL' }), { status: 400 }))
     );
     expect(await saveRelays(['bad'])).toEqual({ ok: false, error: 'relay 1: not a valid URL' });
     vi.unstubAllGlobals();
+  });
+
+  it('returns safe results for a rejected fetch and failed non-JSON response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('network'))));
+    await expect(saveRelays([])).resolves.toEqual({ ok: false, error: 'Could not reach the server. Check your connection and try again.' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('gateway failure', { status: 502 })));
+    await expect(saveRelays([])).resolves.toEqual({ ok: false, error: 'We could not save your relays. Please try again.' });
   });
 });
 
@@ -623,6 +596,14 @@ describe('releaseIdentifier', () => {
     expect(await releaseIdentifier()).toEqual({ ok: true });
     vi.unstubAllGlobals();
   });
+  it('returns a safe result for a rejected release request', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('network'))));
+    await expect(releaseIdentifier()).resolves.toEqual({ ok: false, error: 'Could not reach the server. Check your connection and try again.' });
+  });
+});
+
+it('maps a one-based indexed relay error to its zero-based row', () => {
+  expect(parseRelayError('relay 2: must start with wss://')).toEqual({ index: 1, message: 'must start with wss://' });
 });
 ```
 
@@ -634,49 +615,70 @@ Expected: FAIL — `./accountForm` does not exist.
 - [ ] **Step 3: Write the implementation**
 
 ```ts
-// src/lib/client/accountForm.ts
+// src/lib/client/accountForm.ts — total result helpers
+const NETWORK_ERROR = 'Could not reach the server. Check your connection and try again.';
+const SAVE_ERROR = 'We could not save your relays. Please try again.';
+const RELEASE_ERROR = 'We could not release this identifier. Please try again.';
+
+function hasError(body: unknown): body is { error: string } {
+  return typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string';
+}
+
+export function parseRelayError(error: string): { index: number; message: string } | null {
+  const match = /^relay (\d+):\s*(.+)$/i.exec(error);
+  if (!match) return null;
+  const relayNumber = Number(match[1]);
+  const message = match[2].trim();
+  return Number.isSafeInteger(relayNumber) && relayNumber >= 1 && message
+    ? { index: relayNumber - 1, message }
+    : null;
+}
+
 export async function saveRelays(
   relays: string[]
 ): Promise<{ ok: true; relays: string[] } | { ok: false; error: string }> {
-  const response = await fetch('/api/account/relays', {
-    method: 'PUT',
-    body: JSON.stringify({ relays })
-  });
-  const body = await response.json().catch(() => ({ error: 'unknown_error' }));
-  if (response.status === 200) {
-    return { ok: true, relays: body.relays };
+  let response: Response;
+  try {
+    response = await fetch('/api/account/relays', { method: 'PUT', body: JSON.stringify({ relays }) });
+  } catch {
+    return { ok: false, error: NETWORK_ERROR };
   }
-  return { ok: false, error: body.error ?? 'unknown_error' };
+  let body: unknown;
+  try { body = await response.json(); } catch { return { ok: false, error: SAVE_ERROR }; }
+  if (response.status === 200) {
+    if (typeof body === 'object' && body !== null && Array.isArray((body as { relays?: unknown }).relays) && (body as { relays: unknown[] }).relays.every((relay) => typeof relay === 'string')) {
+      return { ok: true, relays: (body as { relays: string[] }).relays };
+    }
+    return { ok: false, error: SAVE_ERROR };
+  }
+  return { ok: false, error: hasError(body) ? body.error : SAVE_ERROR };
 }
 
 export async function releaseIdentifier(): Promise<{ ok: true } | { ok: false; error: string }> {
-  const response = await fetch('/api/account/release', { method: 'POST' });
+  let response: Response;
+  try { response = await fetch('/api/account/release', { method: 'POST' }); }
+  catch { return { ok: false, error: NETWORK_ERROR }; }
   if (response.status === 200) {
     return { ok: true };
   }
-  const body = await response.json().catch(() => ({ error: 'unknown_error' }));
-  return { ok: false, error: body.error ?? 'unknown_error' };
+  let body: unknown;
+  try { body = await response.json(); } catch { return { ok: false, error: RELEASE_ERROR }; }
+  return { ok: false, error: hasError(body) ? body.error : RELEASE_ERROR };
 }
 
 export function eligibleForReleaseDate(lastIdentifiedAtIso: string): Date {
   const date = new Date(lastIdentifiedAtIso);
-  return new Date(
-    Date.UTC(
-      date.getUTCFullYear(),
-      date.getUTCMonth() + 6,
-      date.getUTCDate(),
-      date.getUTCHours(),
-      date.getUTCMinutes(),
-      date.getUTCSeconds()
-    )
-  );
+  const targetYear = date.getUTCFullYear() + Math.floor((date.getUTCMonth() + 6) / 12);
+  const targetMonth = (date.getUTCMonth() + 6) % 12;
+  const lastTargetDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(targetYear, targetMonth, Math.min(date.getUTCDate(), lastTargetDay), date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds(), date.getUTCMilliseconds()));
 }
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run src/lib/client/accountForm.test.ts`
-Expected: PASS (4 tests)
+Expected: all helper assertions in the current snippet pass.
 
 - [ ] **Step 5: Commit**
 
@@ -696,63 +698,138 @@ git commit -m "feat: add client-side account form logic"
 - Consumes: `CredentialCard` (Claim flow, `$lib/client/CredentialCard.svelte`), `saveRelays`, `releaseIdentifier`, `eligibleForReleaseDate` from Task 5
 - Produces: the `/account` route. No dedicated Vitest test (thin markup+wiring, verified by Task 8's Playwright test), consistent with prior sub-projects' convention.
 
+Mounted `page.test.ts` covers rejected save/release responses, dirty revision protection, indexed error ARIA wiring, safe initial focus, Tab/Shift+Tab containment, idle Escape/focus restoration, and the pending dialog fallback; the dialog has no outside-click dismissal.
+
 - [ ] **Step 1: Write `+page.svelte`**
 
 ```svelte
 <!-- src/routes/account/+page.svelte -->
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { tick } from 'svelte';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
-  import { eligibleForReleaseDate, releaseIdentifier, saveRelays } from '$lib/client/accountForm';
+  import { eligibleForReleaseDate, parseRelayError, releaseIdentifier, saveRelays } from '$lib/client/accountForm';
 
   let { data } = $props<{ data: { name: string; relays: string[]; lastIdentifiedAt: string } }>();
 
   let relays = $state<string[]>([...data.relays]);
+  let relayDraftRevision = $state(0);
   let saveError = $state('');
   let saveStatus = $state<'idle' | 'saving' | 'saved'>('idle');
+  let relayErrorIndex = $state<number | null>(null);
+  let relayErrorMessage = $state('');
   let showReleaseModal = $state(false);
+  let releaseStatus = $state<'idle' | 'releasing'>('idle');
+  let releaseError = $state('');
+  let releaseLauncher = $state<HTMLButtonElement>();
+  let releaseAction = $state<HTMLButtonElement>();
+  let releaseCancel = $state<HTMLButtonElement>();
+  let releaseDialog = $state<HTMLDivElement>();
 
   const eligibleDate = eligibleForReleaseDate(data.lastIdentifiedAt);
 
+  function markRelaysDirty() {
+    relayDraftRevision += 1;
+    if (saveStatus !== 'saving') saveStatus = 'idle';
+    saveError = '';
+    relayErrorIndex = null;
+    relayErrorMessage = '';
+  }
+
   function addRelay() {
+    markRelaysDirty();
     if (relays.length < 8) relays = [...relays, ''];
   }
 
   function removeRelay(index: number) {
+    markRelaysDirty();
     relays = relays.filter((_, i) => i !== index);
   }
 
+  function updateRelay(index: number, value: string) {
+    markRelaysDirty();
+    relays = relays.map((relay, i) => (i === index ? value : relay));
+  }
+
   async function save() {
+    if (saveStatus === 'saving') return;
+    const requestRevision = relayDraftRevision;
     saveStatus = 'saving';
     saveError = '';
-    const result = await saveRelays(relays.filter((r) => r.trim().length > 0));
-    if (result.ok) {
-      relays = result.relays;
-      saveStatus = 'saved';
-    } else {
+    relayErrorIndex = null;
+    relayErrorMessage = '';
+    const submittedRelays = relays
+      .map((relay, visibleIndex) => ({ relay, visibleIndex }))
+      .filter(({ relay }) => relay.trim().length > 0);
+    try {
+      const result = await saveRelays(submittedRelays.map(({ relay }) => relay));
+      if (requestRevision !== relayDraftRevision) return;
+      if (result.ok) { relays = result.relays; saveStatus = 'saved'; return; }
+      const relayError = parseRelayError(result.error);
+      const visibleErrorIndex = relayError
+        ? submittedRelays[relayError.index]?.visibleIndex
+        : undefined;
+      if (relayError && visibleErrorIndex !== undefined) {
+        relayErrorIndex = visibleErrorIndex;
+        relayErrorMessage = relayError.message;
+        return;
+      }
       saveError = result.error;
-      saveStatus = 'idle';
+    } finally {
+      if (saveStatus === 'saving') saveStatus = 'idle';
     }
   }
 
+  function openReleaseModal() {
+    releaseError = '';
+    showReleaseModal = true;
+    void tick().then(() => releaseCancel?.focus());
+  }
+
+  function closeReleaseModal() {
+    if (releaseStatus === 'releasing') return;
+    showReleaseModal = false;
+    releaseError = '';
+    void tick().then(() => releaseLauncher?.focus());
+  }
+
+  function handleReleaseKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') { if (releaseStatus === 'idle') { event.preventDefault(); closeReleaseModal(); } return; }
+    if (event.key !== 'Tab') return;
+    event.preventDefault();
+    if (releaseStatus === 'releasing') { releaseDialog?.focus(); return; }
+    const current = document.activeElement;
+    (event.shiftKey ? (current === releaseCancel ? releaseAction : releaseCancel) : (current === releaseAction ? releaseCancel : releaseAction))?.focus();
+  }
+
   async function confirmRelease() {
-    const result = await releaseIdentifier();
-    if (result.ok) {
-      await goto('/claim');
+    if (releaseStatus === 'releasing') return;
+    releaseStatus = 'releasing';
+    releaseError = '';
+    void tick().then(() => { if (releaseStatus === 'releasing') releaseDialog?.focus(); });
+    try {
+      const result = await releaseIdentifier();
+      if (result.ok) { await goto('/claim'); return; }
+      releaseError = result.error;
+    } finally {
+      if (releaseStatus === 'releasing') releaseStatus = 'idle';
+      if (releaseError) void tick().then(() => releaseAction?.focus());
     }
   }
 </script>
 
 <CredentialCard title={data.name}>
-  <p class="status">Last verified: {new Date(data.lastIdentifiedAt).toLocaleDateString()}</p>
+  <p class="status">Last NIP-05 lookup: {new Date(data.lastIdentifiedAt).toLocaleDateString()}</p>
+  <p class="helper">Public NIP-05 lookups determine release eligibility.</p>
   <p class="status">Eligible for release after: {eligibleDate.toLocaleDateString()}</p>
 
   <h2>Relays</h2>
   {#each relays as relay, index}
     <div class="relay-row">
-      <input bind:value={relays[index]} placeholder="wss://…" />
+      <input value={relay} oninput={(event) => updateRelay(index, event.currentTarget.value)} placeholder="wss://…" aria-invalid={relayErrorIndex === index ? 'true' : undefined} aria-describedby={relayErrorIndex === index ? `relay-${index}-error` : undefined} />
       <button onclick={() => removeRelay(index)}>Remove</button>
     </div>
+    {#if relayErrorIndex === index}<p id={`relay-${index}-error`} class="error" role="alert">{relayErrorMessage}</p>{/if}
   {/each}
   {#if relays.length < 8}
     <button onclick={addRelay}>Add relay</button>
@@ -764,27 +841,28 @@ git commit -m "feat: add client-side account form logic"
     <p class="error" role="alert">{saveError}</p>
   {/if}
 
-  <button onclick={() => (showReleaseModal = true)}>Release this identifier</button>
+  <button bind:this={releaseLauncher} onclick={openReleaseModal}>Release this identifier</button>
 </CredentialCard>
 
 {#if showReleaseModal}
-  <div class="modal" role="dialog" aria-modal="true">
+  <div bind:this={releaseDialog} class="modal" role="dialog" aria-modal="true" tabindex="-1" onkeydown={handleReleaseKeydown}>
     <div class="modal__content">
       <p>Releasing {data.name} makes it available for anyone else to claim. This cannot be undone.</p>
-      <button onclick={confirmRelease}>Release {data.name}</button>
-      <button onclick={() => (showReleaseModal = false)}>Cancel</button>
+      {#if releaseError}<p class="error" role="alert">{releaseError}</p>{/if}
+      <button bind:this={releaseAction} onclick={confirmRelease} disabled={releaseStatus === 'releasing'}>{releaseStatus === 'releasing' ? 'Releasing…' : `Release ${data.name}`}</button>
+      <button bind:this={releaseCancel} onclick={closeReleaseModal} disabled={releaseStatus === 'releasing'}>Cancel</button>
     </div>
   </div>
 {/if}
 
 <style>
   .status {
-    font-family: var(--font-mono);
+    font-family: var(--font-ui);
     font-size: 0.875rem;
     color: var(--color-ink);
   }
   .error {
-    color: var(--color-oxblood);
+    color: var(--color-accent-rose-text);
   }
   .modal {
     position: fixed;
@@ -820,7 +898,7 @@ git commit -m "feat: add /account screen"
 
 **Files:**
 - Modify: `src/routes/claim/+page.server.ts`
-- Modify: `src/routes/claim/+page.server.test.ts`
+- Modify: `src/routes/claim/page.server.test.ts`
 
 **Interfaces:**
 - Consumes: nothing new
@@ -829,7 +907,7 @@ git commit -m "feat: add /account screen"
 - [ ] **Step 1: Update the test's expectation**
 
 ```ts
-// src/routes/claim/+page.server.test.ts (full file)
+// src/routes/claim/page.server.test.ts (full file)
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -868,7 +946,7 @@ describe('claim page load', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `pnpm vitest run src/routes/claim/+page.server.test.ts`
+Run: `pnpm vitest run src/routes/claim/page.server.test.ts`
 Expected: FAIL — the redirect still points at `/claimed`.
 
 - [ ] **Step 3: Update the implementation**
@@ -900,13 +978,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `pnpm vitest run src/routes/claim/+page.server.test.ts`
+Run: `pnpm vitest run src/routes/claim/page.server.test.ts`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/routes/claim/+page.server.ts src/routes/claim/+page.server.test.ts
+git add src/routes/claim/+page.server.ts src/routes/claim/page.server.test.ts
 git commit -m "fix: redirect existing owners from /claim to /account"
 ```
 
@@ -1039,7 +1117,7 @@ Add a new section after "Claim flow":
 ```markdown
 ## Account management
 
-- `/account` — view your identifier, edit its relay list (up to 8, `wss://` only outside dev), see when it was last verified and when it becomes eligible for release, and release it.
+- `/account` — view your identifier, edit its relay list (up to 8, `wss://` only outside dev), see the `Last NIP-05 lookup` and when it becomes eligible for release, and release it.
 - Releasing an identifier is immediate and irreversible; it can be claimed by anyone afterward.
 ```
 
@@ -1048,15 +1126,15 @@ Add a new section after "Claim flow":
 Run: `pnpm test:coverage`
 Expected: all tests pass (Foundation's, Auth's, Claim flow's, and this plan's); coverage meets the 90% threshold.
 
-- [ ] **Step 3: Run static checks**
+- [ ] **Step 3: Run format, static checks, and a production build**
 
-Run: `pnpm check && pnpm lint`
-Expected: both succeed with no errors.
+Run: `pnpm format:check && pnpm lint && pnpm check && pnpm build`
+Expected: all succeed with no errors.
 
 - [ ] **Step 4: Run the e2e suite**
 
 Run: `pnpm test:e2e`
-Expected: PASS (2 tests), per Task 8.
+Expected: zero failures from the discovered suite.
 
 - [ ] **Step 5: Manual smoke test**
 

@@ -1,12 +1,13 @@
 <script lang="ts">
   interface Props {
     title: string;
+    wide?: boolean;
     children: import('svelte').Snippet;
   }
-  let { title, children }: Props = $props();
+  let { title, wide = false, children }: Props = $props();
 </script>
 
-<div class="credential-card">
+<div class="credential-card" class:credential-card--wide={wide}>
   <div class="credential-card__header">{title}</div>
   <div class="credential-card__body">
     {@render children()}
@@ -17,9 +18,13 @@
   .credential-card {
     max-width: 28rem;
     width: 100%;
-    background: white;
+    background: var(--color-paper);
     border: 1px solid var(--color-line);
     padding: var(--space-4);
+  }
+
+  .credential-card--wide {
+    max-width: 64rem;
   }
 
   .credential-card__header {

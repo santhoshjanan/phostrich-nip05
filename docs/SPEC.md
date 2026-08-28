@@ -55,7 +55,6 @@ All privileged logic lives in `src/lib/server/**`. Route files (`+page.server.ts
 - `src/lib/server/auth/` — challenge issue/verify, session create/destroy
 - `src/lib/server/db/` — Drizzle schema + queries
 - `src/lib/server/valkey.ts` — single shared client
-- `src/lib/server/jobs/` — the inactivity-scan job (see Identifier lifecycle)
 - `src/hooks.server.ts` — resolves the session cookie into `event.locals.user` on every request
 
 ### Key normalization (recurring source of bugs)
@@ -116,7 +115,7 @@ Availability is decided by the constraint, not by a read-then-write. Attempt the
 
 Two kinds of reservation, deliberately stored differently:
 
-- **Exact names → database, admin-editable.** Rows with `status = 'reserved'`, plus a reason and the admin pubkey that set it. Reservations have a lifecycle (held for a trademark, later granted or released) and need an audit trail, so they must be changeable without a redeploy. The admin settings page is the surface for this.
+- **Exact names → database, admin-editable.** Rows with `status = 'reserved'`, plus a required, server-trimmed nonblank reason and the admin pubkey that set it. Reservations have a lifecycle (held for a trademark, later granted or released) and need an audit trail, so they must be changeable without a redeploy. The admin settings page is the surface for this.
 - **Patterns → config, code-reviewed.** `admin`, `support`, `help`, `phostrich`, anything matching `^_`, slur substrings. These are rules rather than data, they change rarely, and they should go through review rather than a dashboard form. Checked at claim time, before the insert.
 
 `_` is the root identifier: `nostr.json?name=_` identifies the *domain itself*, so `phostrich.com` resolves as an identity. Point it at the platform's own pubkey and block it from the claim path entirely — never let it reach the user-claimable pool.
@@ -125,15 +124,15 @@ Reserved and blocked names are invisible to the public endpoint. `nostr.json` re
 
 Also enforce at claim time: a length range, no leading or trailing `.`/`-`/`_`, and no consecutive dots. Confusable-character squatting (`1`/`l`, `0`/`o`) is not worth blocking automatically at v1, but flagging near-collisions with existing names in the admin report is cheap.
 
-**Release.** A user can release their own identifier from the account page. Release is a hard delete of the row, not a status flip back to available — a soft-deleted "claimed" row would still occupy the unique index slot unless it were carved out with a partial index, which is unnecessary complexity. Write a row to a separate append-only `identifier_events` audit table (`claimed | released | force_released`, actor pubkey, timestamp) before or in the same transaction as the delete, since the row that would normally carry that history is gone.
+**Release.** A user can release their own identifier from the account page. Release is a hard delete of the row, not a status flip back to available — a soft-deleted "claimed" row would still occupy the unique index slot unless it were carved out with a partial index, which is unnecessary complexity. The owner-scoped `DELETE ... RETURNING` and its separate append-only `identifier_events` audit row (`claimed | released | force_released`, actor pubkey, timestamp) occur in the same transaction, since the row that would normally carry that history is gone.
 
 **Inactivity tracking.** `identifiers.last_identified_at` records the last time the name was actually looked up via `nostr.json`, defaulting to the claim timestamp so a brand-new name isn't immediately stale. Updating it on every request would turn the one hot, unauthenticated public route into a write path, which defeats the caching design above — so update it lazily: on a request for a name, write `last_identified_at` only if the stored value is more than a day old (`UPDATE ... WHERE name = $1 AND last_identified_at < now() - interval '1 day'`), which is a no-op for the overwhelming majority of requests and still gives day-granularity, more than enough for a 6-month window.
 
-**Expiry policy is a report, not an automatic delete, and warns at claim time rather than by DM.** No ongoing-notification channel is required, which is deliberate — it sidesteps relying on relay-delivered DMs for something as consequential as losing an identity:
+**Expiry policy is a live report, not an automatic delete, and warns at claim time rather than by DM.** No ongoing-notification channel is required, which is deliberate — it sidesteps relying on relay-delivered DMs for something as consequential as losing an identity:
 - At claim time, a modal states the inactivity policy in plain terms (identifier freed after N months with no lookup) before the claim is confirmed — this is the only place the policy is communicated, so its wording is worth getting right and worth a coverage test that it appears.
-- The account page shows the current status next to each owned identifier — last-seen date and, once it enters the flagged window, an explicit "inactive since / eligible for release after" line — so a returning user can see it without having remembered the modal.
-- A daily scheduled job (`src/lib/server/jobs/`; a small script run by a periodic service in `docker-compose.prod.yml` is enough at this scale — no separate scheduler needed) scans for identifiers past the inactivity threshold, **locked at 6 months since `last_identified_at`**, and surfaces them in the admin report, sorted by staleness. No warning threshold or `warned_at` tracking is needed since there's no warning to send.
-- Admin reviews the flagged list and force-releases individual names by hand (same delete path as user-initiated release, audit-logged as `force_released` with the admin pubkey and a required reason). Still deliberately manual, not automatic, for the same reason as before: an unattended auto-release on a Nostr identity is high blast-radius for a false positive, and a manual review step costs little given admin activity is already infrequent.
+- The account page shows the current status next to each owned identifier — `Last NIP-05 lookup` and a calm `Eligible for release after` line — so a returning user can see it without having remembered the modal.
+- The Admin report is a live database query, sorted by staleness. There is no scheduled scan job: with no warning channel, materialized report, or automatic deletion, a background scan would only duplicate eligibility logic. Both the report and the force-release mutation use the same PostgreSQL condition, `last_identified_at + interval '6 months' < now()`. This addition direction preserves calendar month-end behavior: August 31 plus six months is February 28.
+- Admin reviews the flagged list and force-releases individual names by hand, with a required reason. Required Admin reasons are trimmed server-side, rejected when empty after trimming, and persisted in normalized form. The conditional delete and `force_released` audit insertion occur in the same transaction; cache invalidation remains fail-open after commit. It is deliberately manual: an unattended auto-release on a Nostr identity has a high blast radius for a false positive.
 
 This closes out the DM/warning tension: v1 needs no DM-send capability for expiry at all. The DM-OTP auth fallback above is a separate, still-open question — if it's never built, v1 sends no DMs whatsoever.
 

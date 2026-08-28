@@ -3,7 +3,8 @@ import { identifierEvents, identifiers } from '../db/schema';
 import { invalidateIdentifier } from '../db/identifiers';
 import { isClaimableName } from './reservedPatterns';
 
-export type ClaimResult = { ok: true } | { ok: false; reason: 'invalid_name' | 'name_taken' | 'owner_cap' };
+export type ClaimResult =
+  { ok: true } | { ok: false; reason: 'invalid_name' | 'name_taken' | 'owner_cap' };
 
 export async function claimIdentifier(name: string, ownerPubkey: string): Promise<ClaimResult> {
   if (!isClaimableName(name)) {
@@ -21,7 +22,10 @@ export async function claimIdentifier(name: string, ownerPubkey: string): Promis
     });
   } catch (error) {
     const pgError = error as { code?: string; constraint_name?: string };
-    if (pgError.code === '23505' && pgError.constraint_name === 'identifiers_owner_pubkey_claimed_unique') {
+    if (
+      pgError.code === '23505' &&
+      pgError.constraint_name === 'identifiers_owner_pubkey_claimed_unique'
+    ) {
       return { ok: false, reason: 'owner_cap' };
     }
     if (pgError.code === '23505' && pgError.constraint_name === 'identifiers_name_unique') {

@@ -73,7 +73,10 @@ export async function signInWithBunker(uri: string): Promise<void> {
   const pubkey = await withTimeout(signer.getPublicKey(), 'Connection to your signer timed out.');
   const challenge = await requestChallenge(pubkey);
   const template = buildAuthEventTemplate(window.location.origin, challenge);
-  const event = await withTimeout(signer.signEvent(template), 'Connection to your signer timed out.');
+  const event = await withTimeout(
+    signer.signEvent(template),
+    'Connection to your signer timed out.'
+  );
 
   await submitSignedEvent(event);
 }

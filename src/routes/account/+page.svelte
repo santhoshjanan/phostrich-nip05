@@ -1,63 +1,153 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { tick } from 'svelte';
   import { fade, scale } from 'svelte/transition';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
-  import { eligibleForReleaseDate, releaseIdentifier, saveRelays } from '$lib/client/accountForm';
+  import {
+    eligibleForReleaseDate,
+    parseRelayError,
+    releaseIdentifier,
+    saveRelays
+  } from '$lib/client/accountForm';
 
   let { data } = $props<{ data: { name: string; relays: string[]; lastIdentifiedAt: string } }>();
 
-  // svelte-ignore state_referenced_locally -- relay inputs intentionally own an editable initial draft
-  let relays = $state<string[]>([...data.relays]);
+  let relays = $state<string[]>([]);
+  let relayDraftRevision = $state(0);
   let saveError = $state('');
   let saveStatus = $state<'idle' | 'saving' | 'saved'>('idle');
+  let relayErrorIndex = $state<number | null>(null);
+  let relayErrorMessage = $state('');
   let showReleaseModal = $state(false);
   let releaseStatus = $state<'idle' | 'releasing'>('idle');
   let releaseError = $state('');
+  let releaseLauncher = $state<HTMLButtonElement>();
+  let releaseAction = $state<HTMLButtonElement>();
+  let releaseCancel = $state<HTMLButtonElement>();
+  let releaseDialog = $state<HTMLDivElement>();
 
-  const lastVerifiedDate = $derived(new Date(data.lastIdentifiedAt).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  }));
-  const eligibleDate = $derived(eligibleForReleaseDate(data.lastIdentifiedAt).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  }));
+  const lastVerifiedDate = $derived(
+    new Date(data.lastIdentifiedAt).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  );
+  const eligibleDate = $derived(
+    eligibleForReleaseDate(data.lastIdentifiedAt).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  );
+
+  $effect(() => {
+    relays = [...data.relays];
+  });
+
+  function markRelaysDirty() {
+    relayDraftRevision += 1;
+    if (saveStatus !== 'saving') saveStatus = 'idle';
+    saveError = '';
+    relayErrorIndex = null;
+    relayErrorMessage = '';
+  }
 
   function addRelay() {
+    markRelaysDirty();
     if (relays.length < 8) relays = [...relays, ''];
   }
 
   function removeRelay(index: number) {
+    markRelaysDirty();
     relays = relays.filter((_, relayIndex) => relayIndex !== index);
-    saveStatus = 'idle';
   }
 
   function updateRelay(index: number, value: string) {
+    markRelaysDirty();
     relays = relays.map((relay, relayIndex) => (relayIndex === index ? value : relay));
-    saveStatus = 'idle';
   }
 
   async function save() {
     if (saveStatus === 'saving') return;
 
+    const requestRevision = relayDraftRevision;
     saveStatus = 'saving';
     saveError = '';
-    const result = await saveRelays(relays.filter((relay) => relay.trim().length > 0));
-    if (result.ok) {
-      relays = result.relays;
-      saveStatus = 'saved';
-      return;
-    }
+    relayErrorIndex = null;
+    relayErrorMessage = '';
+    const submittedRelays = relays
+      .map((relay, visibleIndex) => ({ relay, visibleIndex }))
+      .filter(({ relay }) => relay.trim().length > 0);
+    try {
+      const result = await saveRelays(submittedRelays.map(({ relay }) => relay));
+      if (requestRevision !== relayDraftRevision) return;
 
-    saveError = result.error;
-    saveStatus = 'idle';
+      if (result.ok) {
+        relays = result.relays;
+        saveStatus = 'saved';
+        return;
+      }
+
+      const relayError = parseRelayError(result.error);
+      const visibleErrorIndex = relayError
+        ? submittedRelays[relayError.index]?.visibleIndex
+        : undefined;
+      if (relayError && visibleErrorIndex !== undefined) {
+        relayErrorIndex = visibleErrorIndex;
+        relayErrorMessage = relayError.message;
+        return;
+      }
+
+      saveError = result.error;
+    } catch {
+      if (requestRevision === relayDraftRevision) {
+        saveError = 'We could not save your relays. Please try again.';
+      }
+    } finally {
+      if (saveStatus === 'saving') saveStatus = 'idle';
+    }
   }
 
   function openReleaseModal() {
     releaseError = '';
     showReleaseModal = true;
+    void tick().then(() => releaseCancel?.focus());
+  }
+
+  function closeReleaseModal() {
+    if (releaseStatus === 'releasing') return;
+
+    showReleaseModal = false;
+    releaseError = '';
+    void tick().then(() => releaseLauncher?.focus());
+  }
+
+  function handleReleaseKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      if (releaseStatus === 'releasing') return;
+
+      event.preventDefault();
+      closeReleaseModal();
+      return;
+    }
+
+    if (event.key !== 'Tab') return;
+
+    if (releaseStatus === 'releasing') {
+      event.preventDefault();
+      releaseDialog?.focus();
+      return;
+    }
+
+    event.preventDefault();
+    const currentTarget = document.activeElement;
+    if (event.shiftKey) {
+      (currentTarget === releaseCancel ? releaseAction : releaseCancel)?.focus();
+      return;
+    }
+
+    (currentTarget === releaseAction ? releaseCancel : releaseAction)?.focus();
   }
 
   async function confirmRelease() {
@@ -65,14 +155,21 @@
 
     releaseStatus = 'releasing';
     releaseError = '';
-    const result = await releaseIdentifier();
-    if (result.ok) {
-      await goto('/claim');
-      return;
-    }
+    void tick().then(() => {
+      if (releaseStatus === 'releasing') releaseDialog?.focus();
+    });
+    try {
+      const result = await releaseIdentifier();
+      if (result.ok) {
+        await goto('/claim');
+        return;
+      }
 
-    releaseError = 'We could not release this identifier. Please try again.';
-    releaseStatus = 'idle';
+      releaseError = result.error;
+    } finally {
+      if (releaseStatus === 'releasing') releaseStatus = 'idle';
+      if (releaseError) void tick().then(() => releaseAction?.focus());
+    }
   }
 </script>
 
@@ -82,9 +179,10 @@
     <span class="identifier">{data.name}</span>
   </div>
   <div class="ledger-row">
-    <span class="ledger-label">Last verified</span>
+    <span class="ledger-label">Last NIP-05 lookup</span>
     <span class="ledger-value">{lastVerifiedDate}</span>
   </div>
+  <p class="inactivity-note">Public lookups keep this identifier active.</p>
   <div class="ledger-row">
     <span class="ledger-label">Eligible for release after</span>
     <span class="ledger-value">{eligibleDate}</span>
@@ -92,7 +190,7 @@
 
   <section class="relays" aria-labelledby="relays-heading">
     <h2 id="relays-heading">Relays</h2>
-    <p class="relay-note">Your public relay list helps Nostr clients find you.</p>
+    <p class="relay-note">Public · wss:// only · {relays.length} of 8</p>
 
     {#each relays as relay, index}
       <div class="relay-row">
@@ -104,9 +202,16 @@
           value={relay}
           oninput={(event) => updateRelay(index, event.currentTarget.value)}
           placeholder="wss://relay.example"
+          aria-invalid={relayErrorIndex === index ? 'true' : undefined}
+          aria-describedby={relayErrorIndex === index ? `relay-${index}-error` : undefined}
         />
         <button class="secondary remove-button" onclick={() => removeRelay(index)}>Remove</button>
       </div>
+      {#if relayErrorIndex === index}
+        <p id={`relay-${index}-error`} class="error relay-error" role="alert">
+          {relayErrorMessage}
+        </p>
+      {/if}
     {/each}
 
     {#if relays.length < 8}
@@ -127,17 +232,22 @@
   <section class="release" aria-labelledby="release-heading">
     <h2 id="release-heading">Release identifier</h2>
     <p>Releasing it immediately makes {data.name} available for anyone else to claim.</p>
-    <button class="secondary release-button" onclick={openReleaseModal}>Release this identifier</button>
+    <button bind:this={releaseLauncher} class="secondary release-button" onclick={openReleaseModal}
+      >Release this identifier</button
+    >
   </section>
 </CredentialCard>
 
 {#if showReleaseModal}
   <div
+    bind:this={releaseDialog}
     class="modal"
     role="dialog"
     aria-modal="true"
     aria-labelledby="release-modal-title"
     aria-describedby="release-modal-description"
+    tabindex="-1"
+    onkeydown={handleReleaseKeydown}
     transition:fade={{ duration: 200 }}
   >
     <div class="modal__content" transition:scale={{ duration: 200, start: 0.98 }}>
@@ -152,10 +262,19 @@
         <p class="error" role="alert">{releaseError}</p>
       {/if}
       <div class="modal__actions">
-        <button onclick={confirmRelease} disabled={releaseStatus === 'releasing'}>
+        <button
+          bind:this={releaseAction}
+          onclick={confirmRelease}
+          disabled={releaseStatus === 'releasing'}
+        >
           {releaseStatus === 'releasing' ? 'Releasing…' : `Release ${data.name}`}
         </button>
-        <button class="secondary" onclick={() => (showReleaseModal = false)} disabled={releaseStatus === 'releasing'}>
+        <button
+          class="secondary"
+          bind:this={releaseCancel}
+          onclick={closeReleaseModal}
+          disabled={releaseStatus === 'releasing'}
+        >
           Cancel
         </button>
       </div>
@@ -185,6 +304,7 @@
     font-weight: 600;
     margin: 0;
   }
+  .inactivity-note,
   .relay-note,
   .release p {
     color: var(--color-ink-muted);
@@ -255,6 +375,7 @@
     border: 1px solid var(--color-line);
     max-width: 24rem;
     padding: var(--space-4);
+    width: 100%;
   }
   .modal__header {
     border-bottom: 1px solid var(--color-line);

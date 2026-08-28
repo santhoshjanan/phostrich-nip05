@@ -57,6 +57,12 @@ New env for e2e only: `PUBLIC_ORIGIN` must match wherever `pnpm preview` actuall
 - `/account` — view your identifier, edit its public relay list (up to 8; `wss://` only outside development), see when it was last verified and when it becomes eligible for release, and release it.
 - Releasing an identifier is immediate and irreversible; anyone can claim it afterward.
 
+## Admin dashboard
+
+- `/admin` — visible only to pubkeys listed in `ADMIN_PUBKEYS`. Two sections: a live report of identifiers not looked up through NIP-05 for six calendar months (with force-release, reason required), and reservation management (add/remove, reason required on add).
+- Admin actions are always audit-logged to `identifier_events` with the acting admin's pubkey.
+- Production deployments must set `ADMIN_PUBKEYS` to their own comma-separated, 64-character lowercase-hex pubkeys. The example environment intentionally grants no administrator access; the checked-in fixed signer is authorized only by the Playwright/CI test environment.
+
 ## Other commands
 
     pnpm check        # svelte-check + TypeScript

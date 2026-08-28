@@ -1,6 +1,18 @@
 // tests/e2e/claim-flow.spec.ts
 import { test, expect } from '@playwright/test';
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools';
+import { eq } from 'drizzle-orm';
+import { db } from '../../src/lib/server/db';
+import { identifierEvents, identifiers } from '../../src/lib/server/db/schema';
+
+let claimName = '';
+
+test.afterEach(async () => {
+  if (!claimName) return;
+  await db.delete(identifierEvents).where(eq(identifierEvents.identifierName, claimName));
+  await db.delete(identifiers).where(eq(identifiers.name, claimName));
+  claimName = '';
+});
 
 test('sign in with a fake extension and claim an identifier', async ({ page }) => {
   const secretKey = generateSecretKey();
@@ -20,7 +32,7 @@ test('sign in with a fake extension and claim an identifier', async ({ page }) =
     };
   });
 
-  const claimName = 'e2e' + Date.now();
+  claimName = 'e2e' + Date.now();
 
   await page.goto('/login');
   await page.getByRole('button', { name: 'Sign in with extension' }).click();

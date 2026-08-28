@@ -71,7 +71,7 @@ intentional Valkey connection-refused stderr message while still passing.
 
 ## Commit
 
-Commit SHA: pending
+Commit SHA: `8b0368eff664e4b25439f6a387d1a03bf3c94f1`
 
 ## Concerns
 

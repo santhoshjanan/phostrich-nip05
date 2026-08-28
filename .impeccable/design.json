@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-27T00:00:00Z",
+  "title": "Design System: Phostrich Claim Flow",
+  "extensions": {
+    "colorMeta": {
+      "ink": { "role": "primary", "displayName": "Charcoal-Plum Ink", "canonical": "#2e2a33", "tonalRamp": ["#16141a", "#211e26", "#2e2a33", "#3f3a44", "#544e5a", "#6b6572", "#8f8a94", "#cfc9d6"] },
+      "accent-mint-text": { "role": "secondary", "displayName": "Deep Pine (mint text)", "canonical": "#2f6b52", "tonalRamp": ["#12291f", "#1c3f30", "#2f6b52", "#3f8a6b", "#5ba686", "#a8d8c9", "#c8e6da", "#e9f5ef"] },
+      "accent-mint": { "role": "secondary", "displayName": "Sage-Mint", "canonical": "#a8d8c9", "tonalRamp": ["#12291f", "#1c3f30", "#2f6b52", "#5ba686", "#a8d8c9", "#c8e6da", "#e0f0e8", "#f3faf7"] },
+      "accent-rose-text": { "role": "tertiary", "displayName": "Deep Berry (rose text)", "canonical": "#9c4a5c", "tonalRamp": ["#3a1620", "#5c2331", "#9c4a5c", "#b9677a", "#cf8b98", "#e8b4bc", "#f1cdd3", "#f9e8eb"] },
+      "accent-rose": { "role": "tertiary", "displayName": "Dusty Rose", "canonical": "#e8b4bc", "tonalRamp": ["#3a1620", "#5c2331", "#9c4a5c", "#cf8b98", "#e8b4bc", "#f1cdd3", "#f6dee2", "#fbf1f2"] },
+      "canvas": { "role": "neutral", "displayName": "Lavender-White Canvas", "canonical": "#f5f3f8", "tonalRamp": ["#1b1a1e", "#332f38", "#4d4753", "#6b6572", "#948e9c", "#c3bdcb", "#e2dfe8", "#f5f3f8"] },
+      "paper": { "role": "neutral", "displayName": "Paper White", "canonical": "#ffffff", "tonalRamp": ["#1a1a1a", "#333333", "#4d4d4d", "#666666", "#999999", "#cccccc", "#eeeeee", "#ffffff"] },
+      "line": { "role": "neutral", "displayName": "Hairline", "canonical": "#cfc9d6", "tonalRamp": ["#211e26", "#3f3a44", "#544e5a", "#6b6572", "#948e9c", "#cfc9d6", "#e2dfe8", "#f2f0f5"] },
+      "ink-muted": { "role": "neutral", "displayName": "Muted Plum", "canonical": "#6b6572", "tonalRamp": ["#16141a", "#211e26", "#2e2a33", "#544e5a", "#6b6572", "#948e9c", "#c3bdcb", "#e2dfe8"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display (Identifier Serif)", "purpose": "The identifier name value only — nowhere else." },
+      "title": { "displayName": "Title", "purpose": "Card and modal headers, on the sans face." },
+      "body": { "displayName": "Body", "purpose": "Policy copy, helper notes, error text." },
+      "label": { "displayName": "Ledger Label", "purpose": "Uppercase serial tags for ledger-row values and the field label." },
+      "mono": { "displayName": "Seal Mono", "purpose": "The stamped seal's micro-copy only." }
+    },
+    "shadows": [],
+    "motion": [
+      { "name": "state-transition", "value": "0.15s ease", "purpose": "Border/background/outline color shifts on input focus and button hover." },
+      { "name": "modal-fade", "value": "fade 200ms", "purpose": "Scrim entrance for the policy modal." },
+      { "name": "modal-scale", "value": "scale 200ms, start 0.98", "purpose": "Modal content entrance, paired with modal-fade." }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Ink-filled action button; primary call to action on every screen.",
+      "html": "<button class=\"ds-btn-primary\">Claim this name</button>",
+      "css": ".ds-btn-primary { background: #2e2a33; color: #f5f3f8; border: 1px solid #2e2a33; border-radius: 2px; padding: 0.5rem 1.25rem; font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; font-size: 0.95rem; cursor: pointer; transition: background-color 0.15s ease, border-color 0.15s ease; } .ds-btn-primary:hover { background: #6b6572; border-color: #6b6572; } .ds-btn-primary:focus-visible { outline: 2px solid #a8d8c9; outline-offset: 1px; } .ds-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Transparent ghost button; used for Cancel in the policy modal.",
+      "html": "<button class=\"ds-btn-secondary\">Cancel</button>",
+      "css": ".ds-btn-secondary { background: transparent; color: #2e2a33; border: 1px solid #2e2a33; border-radius: 2px; padding: 0.5rem 1.25rem; font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; font-size: 0.95rem; cursor: pointer; transition: background-color 0.15s ease; } .ds-btn-secondary:hover { background: #cfc9d6; } .ds-btn-secondary:focus-visible { outline: 2px solid #a8d8c9; outline-offset: 1px; }"
+    },
+    {
+      "name": "Identifier Input",
+      "kind": "input",
+      "refersTo": "input-text",
+      "description": "The name field; typed value renders in the display serif.",
+      "html": "<input class=\"ds-input\" placeholder=\"alice\" />",
+      "css": ".ds-input { padding: 0.5rem 0.75rem; border: 1px solid #cfc9d6; border-radius: 2px; font-family: 'Source Serif 4', serif; font-size: 1.1rem; background: #ffffff; color: #2e2a33; width: 100%; transition: border-color 0.15s ease, outline-color 0.15s ease; } .ds-input:focus { border-color: #2e2a33; outline: 2px solid #a8d8c9; outline-offset: 1px; } .ds-input::placeholder { color: #6b6572; }"
+    },
+    {
+      "name": "Ledger Row",
+      "kind": "custom",
+      "refersTo": "credential-card",
+      "description": "The recurring label/value document row used for every fact stated about an identifier.",
+      "html": "<div class=\"ds-ledger-row\"><span class=\"ds-ledger-label\">Status</span><span class=\"ds-ledger-value\">available</span></div>",
+      "css": ".ds-ledger-row { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; border-top: 1px solid #cfc9d6; padding-top: 0.5rem; margin-top: 1rem; } .ds-ledger-label { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; font-size: 0.7rem; letter-spacing: 0.05em; text-transform: uppercase; color: #6b6572; white-space: nowrap; } .ds-ledger-value { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; font-size: 0.9rem; color: #2e2a33; text-align: right; }"
+    },
+    {
+      "name": "Credential Card",
+      "kind": "card",
+      "refersTo": "credential-card",
+      "description": "The single centered surface every screen is built from: ruled header over a body slot.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card__header\">Claim your identifier</div><div class=\"ds-card__body\">...</div></div>",
+      "css": ".ds-card { max-width: 28rem; width: 100%; background: #ffffff; border: 1px solid #cfc9d6; padding: 2.5rem; } .ds-card__header { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; font-weight: 600; font-size: 1.5rem; color: #2e2a33; border-bottom: 1px solid #cfc9d6; padding-bottom: 1rem; margin-bottom: 1.5rem; }"
+    },
+    {
+      "name": "Policy Modal",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Centered dialog with a ruled ledger-style header, shown before a claim is confirmed.",
+      "html": "<div class=\"ds-modal\"><div class=\"ds-modal__content\"><div class=\"ds-modal__header\"><span class=\"ds-ledger-label\">Policy</span><h2>Before you claim</h2></div><p>This identifier is automatically freed after 6 months of inactivity.</p><button class=\"ds-btn-primary\">I understand, claim this name</button><button class=\"ds-btn-secondary\">Cancel</button></div></div>",
+      "css": ".ds-modal { position: fixed; inset: 0; background: rgba(46,42,51,0.5); display: flex; align-items: center; justify-content: center; } .ds-modal__content { background: #ffffff; max-width: 24rem; padding: 2.5rem; border: 1px solid #cfc9d6; } .ds-modal__header { border-bottom: 1px solid #cfc9d6; padding-bottom: 1rem; margin-bottom: 1.5rem; } .ds-modal__header h2 { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; font-weight: 600; font-size: 1.15rem; color: #2e2a33; margin: 0; }"
+    },
+    {
+      "name": "Stamped Seal",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Double-ring rotated seal mark shown only on the issued-credential screen.",
+      "html": "<div class=\"ds-seal\">Issued</div>",
+      "css": ".ds-seal { width: 68px; height: 68px; border-radius: 50%; border: 2px solid #2f6b52; outline: 1px solid #2f6b52; outline-offset: 3px; display: flex; align-items: center; justify-content: center; transform: rotate(-3deg); font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: #2f6b52; text-align: center; line-height: 1.1; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Issued Credential",
+    "overview": "The claim flow reads as a document being processed, not a form being filled out. A single ruled card sits centered on a pale lavender-white ground; every value on it — name, issue date, status — is presented as a row in a ledger, labeled in a small uppercase serial tag and right-aligned like an entry in a records book. The identifier itself is the one word in the whole interface set in serif, because it is the one thing being formally issued; everything that operates the interface (buttons, labels, status text, body copy) stays in a plain system-UI sans so it never competes with the credential. Color is rationed to a single restrained pastel per meaning — sage-mint for available/success, dusty rose for unavailable/void — never as a broad field, only as text, a hairline accent, or the seal ring. Depth comes from ruling, not lighting: hairline borders and horizontal rules do the work shadows would do elsewhere, and the one moment of ornament — the rotated double-ring 'Issued' seal — is reserved exclusively for the successful-claim state. Motion is minimal and fast (150–200ms, no easing drama), present only to soften a modal's arrival or a focus/hover state, never to perform.",
+    "keyCharacteristics": [
+      "Ledger-row layout: label left, value right, hairline rule above.",
+      "One serif reservation: the identifier name only.",
+      "One pastel accent per meaning, applied to text/rings, never as a fill.",
+      "Flat, bordered surfaces; no shadows anywhere in the build.",
+      "Near-square 2px corners everywhere except the one fully round seal."
+    ],
+    "rules": [
+      { "name": "The One Meaning, One Accent Rule", "body": "Sage-mint means available/success and dusty rose means unavailable/void, full stop — neither pastel is reused for any other purpose, and neither ever fills a large surface; both live in text, rings, or a single hairline.", "section": "colors" },
+      { "name": "The Ledger-Not-Lighting Rule", "body": "Separation between surfaces is drawn with a 1px hairline border in --color-line, never a shadow. Depth is structural, not atmospheric.", "section": "colors" },
+      { "name": "The One-Serif Reservation Rule", "body": "Source Serif 4 renders the identifier name and nothing else. Titles, buttons, labels, and body copy stay on the system sans even when bold or large.", "section": "typography" },
+      { "name": "The Uppercase Ledger-Label Rule", "body": "Serial-style field labels are 0.7rem, uppercase, 0.05em tracked, and set in muted plum — never the primary ink color. This is a structural label for a value that follows it, not a decorative pre-headline kicker, and it does not migrate onto marketing or narrative copy.", "section": "typography" },
+      { "name": "The No-Shadow Rule", "body": "Surfaces separate by border and background-value contrast only. A shadow on any card, input, or modal is a deviation from the shipped system.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do reserve Source Serif 4 for the identifier name value alone; every other text element (including bold titles) stays on the system sans.",
+      "Do express availability/unavailability through the deep text-safe accent variant (#2f6b52 / #9c4a5c) plus a semantic device (strike-through for unavailable), never through a filled colored surface.",
+      "Do build depth with hairline borders and canvas/paper value contrast; keep every surface shadow-free.",
+      "Do keep corners at 2px or square (0px) except the seal, which is the one circle in the system.",
+      "Do use the ledger-row pattern (uppercase label / hairline rule / right-aligned value) for any new fact the app states about an identifier or credential."
+    ],
+    "donts": [
+      "Don't introduce a box-shadow anywhere; the build has none, and one would break the ruled-document read.",
+      "Don't fill a surface with the pale mint or rose swatch as a background field — both accents are confirmed as text/ring/outline use only in the shipped build.",
+      "Don't extend the uppercase serial-label device (0.7rem, tracked, muted plum) into a decorative pre-headline kicker on marketing or narrative copy; in this build it is strictly a value's field label inside a ledger row.",
+      "Don't add a second circular or rotated mark. The stamped seal is reserved for the successful-claim state; reusing its geometry elsewhere would dilute the one moment it's meant to punctuate.",
+      "Don't promote JetBrains Mono to general UI labels — the fix round explicitly moved mono off UI labels onto the sans face; mono is confirmed for the seal's micro-copy only."
+    ]
+  }
+}

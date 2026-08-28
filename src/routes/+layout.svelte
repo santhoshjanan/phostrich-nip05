@@ -1,10 +1,7 @@
 <script lang="ts">
   import '../app.css';
-  import { page } from '$app/state';
   let { children } = $props();
 
-  // Footer tracks the masthead's per-route column width.
-  const wideFooter = $derived(page.url.pathname === '/admin');
   const year = new Date().getFullYear();
 </script>
 
@@ -16,19 +13,19 @@ FIRST VIEWPORT: single centered card on a soft pastel ground, ruled document-sty
 FORM: adapted Issued Credential (user-pinned) + restraint/negative-space raise (Saville factory-records catalog) + quantified-precision/single-restrained-accent raise (darkroom exposure-record zone sheets). Seed key fd81ad37, assigned index 7.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance.
 NAVIGATION: authenticated routes (/account, /claim, /admin) carry a hairline ledger masthead — wordmark, serial-label nav, mono acting-pubkey, sign out. /login and /claimed stay chrome-free so the sign-in and issued-credential moments are undiluted.
-FOOTER: a single hairline-ruled site footer on every route — copyright, provenance line, contact — mirroring the masthead's column width and hairline-only depth.
+FOOTER: a thin fixed status bar on every route — copyright, provenance line, contact mailto — segmented by hairline dividers on a paper strip; the app's persistent baseline.
 -->
 
 <div class="root-frame">
   <div class="root-content">
     {@render children()}
   </div>
-  <footer class="site-footer">
-    <div class="site-footer__inner" class:site-footer__inner--wide={wideFooter}>
-      <span>© {year} Phostrich</span>
-      <span>Built in NJ with ❤️</span>
-      <a href="mailto:nostr@phostrich.com">nostr[at]phostrich[dot]com</a>
-    </div>
+  <footer class="statusbar">
+    <span>© {year} Phostrich</span>
+    <span class="statusbar__sep" aria-hidden="true"></span>
+    <span class="statusbar__mid">Built in NJ with ❤️</span>
+    <span class="statusbar__sep" aria-hidden="true"></span>
+    <a href="mailto:nostr@phostrich.com">nostr[at]phostrich[dot]com</a>
   </footer>
 </div>
 
@@ -37,6 +34,8 @@ FOOTER: a single hairline-ruled site footer on every route — copyright, proven
     display: flex;
     flex-direction: column;
     min-height: 100vh;
+    /* clearance so content never hides behind the fixed status bar */
+    padding-bottom: 1.75rem;
   }
   .root-content {
     flex: 1;
@@ -44,43 +43,52 @@ FOOTER: a single hairline-ruled site footer on every route — copyright, proven
     flex-direction: column;
   }
 
-  .site-footer {
-    border-top: 1px solid var(--color-line);
-  }
-  .site-footer__inner {
+  .statusbar {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 5;
+    height: 1.75rem;
     display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    gap: var(--space-1) var(--space-3);
-    max-width: 42rem;
-    margin: 0 auto;
-    width: 100%;
-    padding: var(--space-3);
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 var(--space-2);
+    border-top: 1px solid var(--color-line);
+    background: var(--color-paper);
     font-size: 0.7rem;
-    line-height: 1.4;
+    line-height: 1;
     color: var(--color-ink-muted);
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
-  .site-footer__inner--wide {
-    max-width: 64rem;
+  .statusbar::-webkit-scrollbar {
+    display: none;
   }
-  @media (max-width: 30rem) {
-    .site-footer__inner {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: var(--space-1);
-    }
+  .statusbar > * {
+    flex-shrink: 0;
   }
-  .site-footer a {
+
+  .statusbar__sep {
+    width: 1px;
+    align-self: stretch;
+    margin: 0.375rem 0;
+    background: var(--color-line);
+  }
+
+  .statusbar a {
     color: var(--color-ink-muted);
-    text-decoration: underline;
-    text-decoration-color: var(--color-line);
-    text-underline-offset: 0.15em;
-    transition:
-      color 0.15s ease,
-      text-decoration-color 0.15s ease;
+    text-decoration: none;
   }
-  .site-footer a:hover {
+  .statusbar a:hover {
     color: var(--color-ink);
-    text-decoration-color: currentColor;
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+  }
+
+  @media (max-width: 34rem) {
+    .statusbar__mid,
+    .statusbar__mid + .statusbar__sep {
+      display: none;
+    }
   }
 </style>

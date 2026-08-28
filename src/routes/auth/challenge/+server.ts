@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { issueChallenge } from '$lib/server/auth/challenge';
 import { checkRateLimit } from '$lib/server/auth/rateLimit';
-import { withAuthErrorHandling } from '$lib/server/auth/errorHandling';
+import { withApiErrorHandling } from '$lib/server/http/errorHandling';
 
 const PUBKEY_PATTERN = /^[0-9a-f]{64}$/;
 const CHALLENGE_IP_LIMIT = 20;
@@ -10,7 +10,7 @@ const CHALLENGE_PUBKEY_LIMIT = 10;
 const WINDOW_SECONDS = 300;
 
 export const POST: RequestHandler = async ({ request, getClientAddress }) =>
-  withAuthErrorHandling(async () => {
+  withApiErrorHandling(async () => {
     const body = await request.json().catch(() => null);
     const pubkey = typeof body?.pubkey === 'string' ? body.pubkey : null;
 

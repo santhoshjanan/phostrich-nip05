@@ -29,4 +29,14 @@ describe('claimed page load', () => {
     const result = await load(loadEvent({ pubkey: TEST_OWNER }));
     expect(result.identifier).toContain(TEST_NAME + '@');
   });
+
+  it('returns the real createdAt from the row, not the current date', async () => {
+    const [inserted] = await db
+      .insert(identifiers)
+      .values({ name: TEST_NAME, status: 'claimed', ownerPubkey: TEST_OWNER })
+      .returning({ createdAt: identifiers.createdAt });
+
+    const result = await load(loadEvent({ pubkey: TEST_OWNER }));
+    expect(new Date(result.issuedAt).getTime()).toBe(inserted.createdAt.getTime());
+  });
 });

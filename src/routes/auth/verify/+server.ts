@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { verifyAuthEvent } from '$lib/server/auth/verify';
 import { createSession, SESSION_COOKIE_NAME } from '$lib/server/auth/session';
 import { checkRateLimit } from '$lib/server/auth/rateLimit';
-import { withAuthErrorHandling } from '$lib/server/auth/errorHandling';
+import { withApiErrorHandling } from '$lib/server/http/errorHandling';
 import { config } from '$lib/server/config';
 
 const VERIFY_PUBKEY_LIMIT = 10;
@@ -11,7 +11,7 @@ const VERIFY_IP_LIMIT = 20;
 const WINDOW_SECONDS = 300;
 
 export const POST: RequestHandler = async ({ request, cookies, getClientAddress }) =>
-  withAuthErrorHandling(async () => {
+  withApiErrorHandling(async () => {
     const body = await request.json().catch(() => null);
     const event: unknown =
       body && typeof body === 'object' ? (body as { event?: unknown }).event : undefined;

@@ -8,19 +8,31 @@
   let availability = $state<AvailabilityState>('idle');
   let showModal = $state(false);
   let submitError = $state('');
+  let isSubmitting = $state(false);
 
+  // Each debounced check compares the CURRENT `name` input against the
+  // `value` it was invoked with, so an out-of-order (stale) response is
+  // discarded instead of overwriting the status for whatever the user has
+  // since typed.
   const debouncedCheck = debounce(async (value: string) => {
     if (value.length < 2) {
-      availability = 'idle';
+      if (name.toLowerCase() === value) availability = 'idle';
       return;
     }
-    availability = 'checking';
-    const available = await checkAvailability(value);
-    availability = available ? 'available' : 'unavailable';
+    try {
+      const available = await checkAvailability(value);
+      if (name.toLowerCase() !== value) return; // stale response, discard
+      availability = available ? 'available' : 'unavailable';
+    } catch {
+      if (name.toLowerCase() !== value) return; // stale response, discard
+      availability = 'error';
+    }
   }, 400);
 
   function handleInput() {
-    debouncedCheck(name.toLowerCase());
+    const value = name.toLowerCase();
+    availability = value.length < 2 ? 'idle' : 'checking';
+    debouncedCheck(value);
   }
 
   function openModal() {
@@ -30,14 +42,22 @@
   }
 
   async function confirmClaim() {
-    const result = await submitClaim(name.toLowerCase());
-    if (result.ok) {
-      await goto('/claimed');
-    } else if (result.error === 'unauthenticated') {
-      await goto('/login');
-    } else {
-      submitError = result.error;
+    isSubmitting = true;
+    try {
+      const result = await submitClaim(name.toLowerCase());
+      if (result.ok) {
+        await goto('/claimed');
+      } else if (result.error === 'unauthenticated') {
+        await goto('/login');
+      } else {
+        submitError = result.error;
+        showModal = false;
+      }
+    } catch {
+      submitError = 'unknown_error';
       showModal = false;
+    } finally {
+      isSubmitting = false;
     }
   }
 </script>
@@ -55,6 +75,8 @@
         <span class="ledger-value status status--available">available</span>
       {:else if availability === 'unavailable'}
         <span class="ledger-value status status--unavailable">not available</span>
+      {:else if availability === 'error'}
+        <span class="ledger-value status status--error">couldn't check right now</span>
       {/if}
     </div>
   {/if}
@@ -88,7 +110,7 @@
         This identifier is automatically freed for someone else to claim after 6 months with no lookup
         activity against it.
       </p>
-      <button onclick={confirmClaim}>I understand, claim this name</button>
+      <button onclick={confirmClaim} disabled={isSubmitting}>I understand, claim this name</button>
       <button class="secondary" onclick={() => (showModal = false)}>Cancel</button>
     </div>
   </div>
@@ -106,6 +128,9 @@
   .status--unavailable {
     color: var(--color-accent-rose-text);
     text-decoration: line-through;
+  }
+  .status--error {
+    color: var(--color-accent-rose-text);
   }
   .claim-action {
     margin-top: var(--space-3);

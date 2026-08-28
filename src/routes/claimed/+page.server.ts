@@ -11,7 +11,7 @@ export const load = (async ({ locals }) => {
   }
 
   const [existing] = await db
-    .select({ name: identifiers.name })
+    .select({ name: identifiers.name, createdAt: identifiers.createdAt })
     .from(identifiers)
     .where(and(eq(identifiers.ownerPubkey, locals.user.pubkey), eq(identifiers.status, 'claimed')))
     .limit(1);
@@ -21,5 +21,5 @@ export const load = (async ({ locals }) => {
   }
 
   const origin = new URL(config.PUBLIC_ORIGIN).host;
-  return { identifier: `${existing.name}@${origin}` };
+  return { identifier: `${existing.name}@${origin}`, issuedAt: existing.createdAt };
 }) satisfies PageServerLoad;

@@ -39,6 +39,15 @@ describe('checkAvailability', () => {
     expect(await checkAvailability('admin')).toBe(false);
     vi.unstubAllGlobals();
   });
+
+  it('throws (does not silently resolve to false) on a non-200 response like a 429', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: 'rate limited' }), { status: 429 }))
+    );
+    await expect(checkAvailability('alice')).rejects.toThrow();
+    vi.unstubAllGlobals();
+  });
 });
 
 describe('submitClaim', () => {

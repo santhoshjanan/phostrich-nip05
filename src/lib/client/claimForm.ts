@@ -1,4 +1,4 @@
-export type AvailabilityState = 'idle' | 'checking' | 'available' | 'unavailable';
+export type AvailabilityState = 'idle' | 'checking' | 'available' | 'unavailable' | 'error';
 
 export function debounce<Args extends unknown[]>(fn: (...args: Args) => void, waitMs: number) {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -10,6 +10,9 @@ export function debounce<Args extends unknown[]>(fn: (...args: Args) => void, wa
 
 export async function checkAvailability(name: string): Promise<boolean> {
   const response = await fetch(`/api/identifiers/availability?name=${encodeURIComponent(name)}`);
+  if (!response.ok) {
+    throw new Error(`availability check failed with status ${response.status}`);
+  }
   const body = await response.json();
   return body.available === true;
 }

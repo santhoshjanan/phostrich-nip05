@@ -41,4 +41,20 @@ describe('GET /api/identifiers/availability', () => {
     const response = await GET(requestEvent('admin'));
     expect(await response.json()).toEqual({ available: false });
   });
+
+  it('returns 429 once the per-IP rate limit is exceeded', async () => {
+    const ip = '127.0.0.9';
+    await valkey.del('ratelimit:availability:ip:' + ip);
+    try {
+      for (let i = 0; i < 60; i++) {
+        const resp = await GET(requestEvent(TEST_NAME, ip));
+        expect(resp.status).toBe(200);
+      }
+      const response = await GET(requestEvent(TEST_NAME, ip));
+      expect(response.status).toBe(429);
+      expect(await response.json()).toEqual({ error: 'rate limited' });
+    } finally {
+      await valkey.del('ratelimit:availability:ip:' + ip);
+    }
+  });
 });

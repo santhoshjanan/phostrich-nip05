@@ -1,16 +1,18 @@
 <script lang="ts">
   import CredentialCard from '$lib/client/CredentialCard.svelte';
   interface Props {
-    data: { identifier: string };
+    data: { identifier: string; issuedAt: string | Date };
   }
   let { data }: Props = $props();
   let copied = $state(false);
 
-  const issuedOn = new Date().toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  });
+  const issuedOn = $derived(
+    new Date(data.issuedAt).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  );
 
   async function copy() {
     await navigator.clipboard.writeText(data.identifier);

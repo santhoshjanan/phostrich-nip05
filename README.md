@@ -52,6 +52,11 @@ deploying behind a proxy.
 
 New env for e2e only: `PUBLIC_ORIGIN` must match wherever `pnpm preview` actually serves (default `http://localhost:4173`), since the client's signed auth event and the server's check of it both depend on this value matching exactly.
 
+## Account management
+
+- `/account` — view your identifier, edit its public relay list (up to 8; `wss://` only outside development), see when it was last verified and when it becomes eligible for release, and release it.
+- Releasing an identifier is immediate and irreversible; anyone can claim it afterward.
+
 ## Other commands
 
     pnpm check        # svelte-check + TypeScript

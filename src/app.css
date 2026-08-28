@@ -46,7 +46,7 @@ body {
 }
 
 .ledger-label {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 0.7rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -82,6 +82,7 @@ input:not([type]) {
   background: white;
   color: var(--color-ink);
   width: 100%;
+  transition: border-color 0.15s ease, outline-color 0.15s ease;
 }
 
 input[type='text']:focus,
@@ -89,6 +90,11 @@ input:not([type]):focus {
   border-color: var(--color-ink);
   outline: 2px solid var(--color-accent-mint);
   outline-offset: 1px;
+}
+
+input[type='text']::placeholder,
+input:not([type])::placeholder {
+  color: var(--color-ink-muted);
 }
 
 button {
@@ -100,6 +106,7 @@ button {
   font-family: var(--font-ui);
   font-size: 0.95rem;
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 button:hover:not(:disabled) {
@@ -123,10 +130,12 @@ button.secondary:hover:not(:disabled) {
 
 /* Stamped seal motif (fix 2), reserved for the successful-claim state */
 .seal {
-  width: 56px;
-  height: 56px;
+  width: 68px;
+  height: 68px;
   border-radius: 50%;
-  border: 1.5px solid var(--color-accent-mint-text);
+  border: 2px solid var(--color-accent-mint-text);
+  outline: 1px solid var(--color-accent-mint-text);
+  outline-offset: 3px;
   display: flex;
   align-items: center;
   justify-content: center;

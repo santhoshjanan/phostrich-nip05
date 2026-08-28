@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { fade, scale } from 'svelte/transition';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
   import { checkAvailability, debounce, submitClaim, type AvailabilityState } from '$lib/client/claimForm';
 
@@ -70,9 +71,20 @@
 </CredentialCard>
 
 {#if showModal}
-  <div class="modal" role="dialog" aria-modal="true">
-    <div class="modal__content">
-      <p>
+  <div
+    class="modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="modal-title"
+    aria-describedby="modal-description"
+    transition:fade={{ duration: 200 }}
+  >
+    <div class="modal__content" transition:scale={{ duration: 200, start: 0.98 }}>
+      <div class="modal__header">
+        <span class="ledger-label">Policy</span>
+        <h2 id="modal-title">Before you claim</h2>
+      </div>
+      <p id="modal-description">
         This identifier is automatically freed for someone else to claim after 6 months with no lookup
         activity against it.
       </p>
@@ -114,6 +126,22 @@
     max-width: 24rem;
     padding: var(--space-4);
     border: 1px solid var(--color-line);
+  }
+  .modal__header {
+    border-bottom: 1px solid var(--color-line);
+    padding-bottom: var(--space-2);
+    margin-bottom: var(--space-3);
+  }
+  .modal__header .ledger-label {
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+  .modal__header h2 {
+    font-family: var(--font-ui);
+    font-weight: 600;
+    font-size: 1.15rem;
+    color: var(--color-ink);
+    margin: 0;
   }
   .modal__content button {
     margin-top: var(--space-2);

@@ -6,7 +6,7 @@ import { valkey } from '$lib/server/valkey';
 import { PUT } from './+server';
 
 const TEST_NAME = 'relays-route-test';
-const TEST_OWNER = '7'.repeat(64);
+const TEST_OWNER = 'f'.repeat(64);
 
 function requestEvent(body: unknown, user: { pubkey: string } | null) {
   return {

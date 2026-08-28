@@ -4,7 +4,7 @@ import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { identifiers } from '$lib/server/db/schema';
 
-export const load: PageServerLoad = async ({ locals }) => {
+export const load = (async ({ locals }) => {
   if (!locals.user) {
     redirect(302, '/login');
   }
@@ -28,4 +28,4 @@ export const load: PageServerLoad = async ({ locals }) => {
     relays: identifier.relays,
     lastIdentifiedAt: identifier.lastIdentifiedAt.toISOString()
   };
-};
+}) satisfies PageServerLoad;

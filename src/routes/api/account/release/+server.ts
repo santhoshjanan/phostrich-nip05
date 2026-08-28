@@ -11,11 +11,12 @@ export const POST: RequestHandler = async ({ locals }) =>
     if (!locals.user) {
       return json({ error: 'unauthenticated' }, { status: 401 });
     }
+    const ownerPubkey = locals.user.pubkey;
 
     const [identifier] = await db
       .select({ name: identifiers.name })
       .from(identifiers)
-      .where(and(eq(identifiers.ownerPubkey, locals.user.pubkey), eq(identifiers.status, 'claimed')))
+      .where(and(eq(identifiers.ownerPubkey, ownerPubkey), eq(identifiers.status, 'claimed')))
       .limit(1);
 
     if (!identifier) {
@@ -27,7 +28,7 @@ export const POST: RequestHandler = async ({ locals }) =>
       await tx.insert(identifierEvents).values({
         identifierName: identifier.name,
         eventType: 'released',
-        actorPubkey: locals.user.pubkey
+        actorPubkey: ownerPubkey
       });
     });
 

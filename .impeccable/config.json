@@ -33,6 +33,18 @@
         "value": "1.5rem",
         "createdAt": "2026-08-28T00:15:37.668Z",
         "reason": "DESIGN.md Hierarchy explicitly cites 1.5rem for card header title"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "1.25rem",
+        "createdAt": "2026-08-28T01:15:05.092Z",
+        "reason": "DESIGN.md documents 1.1rem–1.25rem for the identifier display."
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "1.15rem",
+        "createdAt": "2026-08-28T01:15:05.123Z",
+        "reason": "DESIGN.md documents 1.15rem–1.5rem for UI titles."
       }
     ]
   }

@@ -17,6 +17,18 @@ describe('eligibleForReleaseDate', () => {
 
     expect(result.toISOString()).toBe('2026-07-15T00:00:00.000Z');
   });
+
+  it('clamps August 31 to February 28 in a common year', () => {
+    expect(eligibleForReleaseDate('2026-08-31T12:34:56.000Z').toISOString()).toBe(
+      '2027-02-28T12:34:56.000Z'
+    );
+  });
+
+  it('clamps August 31 to February 29 in a leap year', () => {
+    expect(eligibleForReleaseDate('2027-08-31T12:34:56.000Z').toISOString()).toBe(
+      '2028-02-29T12:34:56.000Z'
+    );
+  });
 });
 
 describe('saveRelays', () => {

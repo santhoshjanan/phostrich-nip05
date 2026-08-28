@@ -82,14 +82,20 @@ export async function releaseIdentifier(): Promise<ReleaseResult> {
 
 export function eligibleForReleaseDate(lastIdentifiedAtIso: string): Date {
   const date = new Date(lastIdentifiedAtIso);
+  const targetMonthStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 6, 1));
+  const targetYear = targetMonthStart.getUTCFullYear();
+  const targetMonth = targetMonthStart.getUTCMonth();
+  const targetLastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+
   return new Date(
     Date.UTC(
-      date.getUTCFullYear(),
-      date.getUTCMonth() + 6,
-      date.getUTCDate(),
+      targetYear,
+      targetMonth,
+      Math.min(date.getUTCDate(), targetLastDay),
       date.getUTCHours(),
       date.getUTCMinutes(),
-      date.getUTCSeconds()
+      date.getUTCSeconds(),
+      date.getUTCMilliseconds()
     )
   );
 }

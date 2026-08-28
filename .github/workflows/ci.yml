@@ -27,8 +27,6 @@ jobs:
           POSTGRES_USER: phostrich
           POSTGRES_PASSWORD: phostrich
           POSTGRES_DB: phostrich
-        ports:
-          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U phostrich"
           --health-interval 5s
@@ -36,11 +34,12 @@ jobs:
           --health-retries 5
       valkey:
         image: valkey/valkey:8-alpine
-        ports:
-          - 6379:6379
     env:
-      DATABASE_URL: postgres://phostrich:phostrich@localhost:5432/phostrich
-      VALKEY_URL: redis://localhost:6379
+      # Jobs run in a container on a per-job network; reach services by name,
+      # not localhost, and don't publish host ports (they collide on a
+      # self-hosted runner that shares the box with other services).
+      DATABASE_URL: postgres://phostrich:phostrich@postgres:5432/phostrich
+      VALKEY_URL: redis://valkey:6379
       PUBLIC_ORIGIN: http://localhost:4173
       CI: true
     steps:

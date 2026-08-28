@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **`docs/SPEC.md` is the product and architecture spec — read it before starting any non-trivial task.** It has the full auth design, data model, identifier lifecycle, deployment topology, and the open/closed decisions. This file only covers how to operate day to day; it does not repeat what's in the spec.
 
-## Status
+## Setup & commands
 
-Greenfield — the repo has no code yet. Once scaffolding lands, replace this section with real commands (verified against `package.json`, not assumed) and delete this note.
+See **`AGENTS.md`** — install steps, the command table, the dev-vs-prod `.env` split, and the known gotchas (e2e needs `pnpm build` first, `test:coverage` wipes seed rows, etc.). Verify any command against `package.json` before relying on it.
 
 ## UI/UX
 

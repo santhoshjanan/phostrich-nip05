@@ -63,4 +63,24 @@ describe('config', () => {
     const { config } = await import('./config?t=' + Date.now());
     expect(config.PUBLIC_ORIGIN).toBe('https://phostrich.com');
   });
+
+  it('defaults ADMIN_PUBKEYS to an empty array when unset', async () => {
+    Object.assign(process.env, REQUIRED_ENV);
+    delete process.env.ADMIN_PUBKEYS;
+    const { config } = await import('./config?t=' + Date.now());
+    expect(config.ADMIN_PUBKEYS).toEqual([]);
+  });
+
+  it('parses and lowercases ADMIN_PUBKEYS', async () => {
+    Object.assign(process.env, REQUIRED_ENV, {
+      ADMIN_PUBKEYS: '6A04AB98D9E4774AD806E302DDDEB63BEA16B5CB5F223EE77478E861BB583EB3'
+    });
+    const { config } = await import('./config?t=' + Date.now());
+    expect(config.ADMIN_PUBKEYS).toEqual(['0000000000000000000000000000000000000000000000000000000000000000']);
+  });
+
+  it('rejects invalid ADMIN_PUBKEYS entries', async () => {
+    Object.assign(process.env, REQUIRED_ENV, { ADMIN_PUBKEYS: 'not-hex' });
+    await expect(import('./config?t=' + Date.now())).rejects.toThrow();
+  });
 });

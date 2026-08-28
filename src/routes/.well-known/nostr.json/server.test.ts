@@ -7,7 +7,7 @@ import { valkey } from '$lib/server/valkey';
 import { config } from '$lib/server/config';
 
 const TEST_NAME = 'foundation-route-test';
-const TEST_PUBKEY = 'f'.repeat(64);
+const TEST_PUBKEY = 'c'.repeat(64);
 
 function requestEvent(name: string | null) {
   const url = new URL('https://phostrich.test/.well-known/nostr.json');

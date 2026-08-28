@@ -14,7 +14,9 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3000/healthz']
+      # 127.0.0.1, not localhost: busybox wget resolves localhost to [::1] first,
+      # but adapter-node binds IPv4 0.0.0.0, so the IPv6 attempt is refused.
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:3000/healthz']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -22,8 +24,13 @@ services:
   migrate:
     build: .
     command: ['pnpm', 'db:migrate']
+    # DATABASE_URL is all the migration itself uses, but scripts/migrate.ts
+    # imports src/lib/server/db, which loads config.ts and validates the full
+    # env schema at module load — so VALKEY_URL and PUBLIC_ORIGIN must be present.
     environment:
       DATABASE_URL: ${DATABASE_URL}
+      VALKEY_URL: ${VALKEY_URL}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
     depends_on:
       postgres:
         condition: service_healthy

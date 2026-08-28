@@ -4,7 +4,7 @@ import { db } from '$lib/server/db';
 import { identifierEvents, identifiers } from '$lib/server/db/schema';
 import { load } from './+page.server';
 
-const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
+const ADMIN_PUBKEY = '0f'.repeat(32);
 const NON_ADMIN_PUBKEY = '1'.repeat(64);
 const TEST_NAME = 'admin-page-load-test';
 const TEST_RESERVATION_NAME = 'admin-page-reservation-test';

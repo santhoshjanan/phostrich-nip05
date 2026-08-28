@@ -1,31 +1,18 @@
-import { expect, test, type TestInfo } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { asc, eq, inArray } from 'drizzle-orm';
 import { db } from '../../src/lib/server/db';
 import { identifierEvents, identifiers } from '../../src/lib/server/db/schema';
+import { createAdminFixtures, type AdminFixtures } from './helpers/adminFixtures';
 import { installFakeNostrExtension } from './helpers/fakeSigner';
-import { signInAsFixedAdmin } from './helpers/fixedAdminSigner';
+import { FIXED_ADMIN_PUBKEY, signInAsFixedAdmin } from './helpers/fixedAdminSigner';
 
-const FIXED_ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
 const STALE_OWNER = '5601000000000000000000000000000000000000000000000000000000000000';
 const FORCE_RELEASE_ROUTE = '**/api/admin/force-release';
 const REMOVE_RESERVATION_ROUTE = '**/api/admin/reservations/*';
 
-type Fixtures = {
-  staleName: string;
-  reservationName: string;
-};
+const fixturesByTestId = new Map<string, AdminFixtures>();
 
-const fixturesByTestId = new Map<string, Fixtures>();
-
-function createFixtures(testInfo: TestInfo): Fixtures {
-  const suffix = `${testInfo.workerIndex}-${testInfo.retry}-${Date.now().toString(36)}`;
-  return {
-    staleName: `e2e-admin-stale-${suffix}`,
-    reservationName: `e2e-admin-reservation-${suffix}`
-  };
-}
-
-async function cleanAdminFixtures(fixtures: Fixtures): Promise<void> {
+async function cleanAdminFixtures(fixtures: AdminFixtures): Promise<void> {
   const names = [fixtures.staleName, fixtures.reservationName];
   await db.delete(identifierEvents).where(inArray(identifierEvents.identifierName, names));
   await db.delete(identifiers).where(inArray(identifiers.name, names));
@@ -42,7 +29,7 @@ async function seedStaleClaimedIdentifier(name: string): Promise<void> {
 
 test.beforeEach(async ({ browserName }, testInfo) => {
   void browserName;
-  const fixtures = createFixtures(testInfo);
+  const fixtures = createAdminFixtures(testInfo.testId, testInfo.workerIndex, testInfo.retry);
   fixturesByTestId.set(testInfo.testId, fixtures);
   await cleanAdminFixtures(fixtures);
 });
@@ -70,10 +57,14 @@ test('reservation removal contains focus, recovers from a rejected request, and 
   const reservationRow = page.getByRole('row', { name: new RegExp(reservationName) });
   await expect(reservationRow).toBeVisible();
 
-  const launcher = reservationRow.getByRole('button', { name: 'Remove', exact: true });
+  const launcher = reservationRow.getByRole('button', {
+    name: `Remove reservation for ${reservationName}`,
+    exact: true
+  });
   await launcher.click();
   const dialog = page.getByRole('dialog', {
-    name: `Remove reservation for ${reservationName}?`
+    name: `Remove reservation for ${reservationName}?`,
+    exact: true
   });
   await expect(dialog).toHaveAccessibleDescription(
     'This makes the name available for anyone else to claim.'
@@ -171,9 +162,15 @@ test('force release contains focus, recovers from a rejected request, and audits
 
   const staleRow = page.getByRole('row', { name: new RegExp(staleName) });
   await expect(staleRow).toBeVisible();
-  const launcher = staleRow.getByRole('button', { name: 'Force release', exact: true });
+  const launcher = staleRow.getByRole('button', {
+    name: `Force release ${staleName}`,
+    exact: true
+  });
   await launcher.click();
-  const dialog = page.getByRole('dialog', { name: `Force release ${staleName}?` });
+  const dialog = page.getByRole('dialog', {
+    name: `Force release ${staleName}?`,
+    exact: true
+  });
   await expect(dialog).toHaveAccessibleDescription(
     'This makes the identifier available for anyone else to claim and cannot be undone.'
   );

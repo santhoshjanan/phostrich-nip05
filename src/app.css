@@ -5,6 +5,7 @@
 
 :root {
   --color-canvas: #f5f3f8; /* pale lavender-white ledger ground */
+  --color-paper: #ffffff; /* card, input, and modal surfaces */
   --color-ink: #2e2a33; /* soft charcoal-plum body text */
   --color-line: #cfc9d6; /* hairline rule / border */
   --color-accent-mint: #a8d8c9; /* available / success — sage-mint */
@@ -79,7 +80,7 @@ input:not([type]) {
   border-radius: 2px;
   font-family: var(--font-ui);
   font-size: 1rem;
-  background: white;
+  background: var(--color-paper);
   color: var(--color-ink);
   width: 100%;
   transition:

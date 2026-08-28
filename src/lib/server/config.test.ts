@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFile } from 'node:fs/promises';
+import { parse } from 'dotenv';
 
 const REQUIRED_ENV = {
   DATABASE_URL: 'postgres://user:pass@localhost:5432/phostrich',
@@ -71,14 +73,21 @@ describe('config', () => {
     expect(config.ADMIN_PUBKEYS).toEqual([]);
   });
 
+  it('does not grant administrator access from the example environment', async () => {
+    const example = parse(
+      await readFile(new URL('../../../.env.example', import.meta.url), 'utf8')
+    );
+    Object.assign(process.env, example);
+    const { config } = await import('./config?t=' + Date.now());
+    expect(config.ADMIN_PUBKEYS).toEqual([]);
+  });
+
   it('parses and lowercases ADMIN_PUBKEYS', async () => {
     Object.assign(process.env, REQUIRED_ENV, {
-      ADMIN_PUBKEYS: '6A04AB98D9E4774AD806E302DDDEB63BEA16B5CB5F223EE77478E861BB583EB3'
+      ADMIN_PUBKEYS: 'A'.repeat(64)
     });
     const { config } = await import('./config?t=' + Date.now());
-    expect(config.ADMIN_PUBKEYS).toEqual([
-      '0000000000000000000000000000000000000000000000000000000000000000'
-    ]);
+    expect(config.ADMIN_PUBKEYS).toEqual(['a'.repeat(64)]);
   });
 
   it('rejects invalid ADMIN_PUBKEYS entries', async () => {

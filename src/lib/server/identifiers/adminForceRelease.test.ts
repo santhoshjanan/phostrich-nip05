@@ -5,7 +5,7 @@ import { identifierEvents, identifiers } from '../db/schema';
 import { valkey } from '../valkey';
 import { forceReleaseAdminIdentifier } from './adminForceRelease';
 
-const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
+const ADMIN_PUBKEY = '0f'.repeat(32);
 const TEST_NAME = 'admin-service-force-release';
 const TEST_OWNER = '5408000000000000000000000000000000000000000000000000000000000000';
 const CACHE_KEY = 'identifier:' + TEST_NAME;

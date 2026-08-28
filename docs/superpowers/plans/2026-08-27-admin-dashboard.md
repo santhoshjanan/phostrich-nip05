@@ -14,6 +14,8 @@
 
 > **Execution status (2026-08-27):** Tasks 1–4 were completed at commit `3f34d20`. Their checklists below are preserved as implementation history and must not be repeated. Remaining execution begins at Task 5.
 
+> **Final-review amendment (2026-08-28):** The completed implementation now keeps `.env.example` admin-empty, injects the fixed signer only from Playwright/CI, uses deterministic validator-safe e2e fixture names, retrieves reservation metadata in one deterministic database statement, adds the stale-name tie-break, and closes the live-region, contextual-label, pending-focus, paper-token, and coarse-pointer findings. Historical task examples below are reconciled to that final contract.
+
 ### Remaining-work environment preflight
 
 Before Task 5, restore the ignored worktree-local environment and services that Task 1's historical instructions assumed:
@@ -24,7 +26,7 @@ docker compose up -d
 pnpm db:migrate
 ```
 
-`.env.example` already contains the fixed Admin e2e pubkey. Keep the resulting `.env` untracked. Vite/Vitest commands below load it automatically. For Playwright preview runs, override the public origin explicitly with `PUBLIC_ORIGIN=http://localhost:4173`; the normal development value in `.env.example` is port 5173.
+`.env.example` intentionally grants no Admin access. Keep the resulting `.env` untracked and add your own lowercase-hex admin pubkey only for manual development. Vitest supplies a separate test-only identity; Playwright injects its fixed signer pubkey and preview origin into both the worker and preview server.
 
 ## Global Constraints
 
@@ -38,7 +40,7 @@ pnpm db:migrate
 - Force-release and reservation creation trim their required reasons server-side, reject empty-after-trim values, and persist the trimmed reason. Reservation removal does not require one.
 - Admin-facing conflict/error messages may be specific (unlike the public-facing endpoints) — the admin already sees the full picture in the report.
 - `identifierEventType` gains `'reserved'` and `'reservation_removed'` — one new migration, nothing else about the schema changes.
-- **Fixed test keypair for admin e2e**: secret key = 32 bytes of `0xaa`; its derived pubkey is `0000000000000000000000000000000000000000000000000000000000000000`. This exact pubkey goes into `.env.example`'s `ADMIN_PUBKEYS` (Task 1) — every other e2e test uses a fresh random keypair per run, but this one can't, since its pubkey must exist in config before the server starts.
+- **Fixed test keypair for admin e2e**: the checked-in signer remains test-only. `playwright.config.ts` derives/imports its public identity and injects it into the Playwright process plus the preview server. Never add that identity to `.env.example`; production operators configure their own lowercase-hex pubkeys.
 - `.svelte` files stay excluded from the coverage threshold; verified by Playwright instead. 90% coverage gate applies to everything else.
 - Every real-database test file owns distinct seed-audited claimed-owner pubkeys. Live-report assertions filter to that suite's fixture names instead of expecting the entire shared database result.
 - All three browser write helpers are typed and total; mounted tests cover rejection, malformed responses, pending/double-submit guards, and finalizer recovery.
@@ -106,10 +108,17 @@ it('defaults ADMIN_PUBKEYS to an empty array when unset', async () => {
 
 it('parses and lowercases ADMIN_PUBKEYS from env', async () => {
   Object.assign(process.env, REQUIRED_ENV, {
-    ADMIN_PUBKEYS: '6A04AB98D9E4774AD806E302DDDEB63BEA16B5CB5F223EE77478E861BB583EB3'
+    ADMIN_PUBKEYS: 'A'.repeat(64)
   });
   const { config } = await import('./config?t=' + Date.now());
-  expect(config.ADMIN_PUBKEYS).toEqual(['0000000000000000000000000000000000000000000000000000000000000000']);
+  expect(config.ADMIN_PUBKEYS).toEqual(['a'.repeat(64)]);
+});
+
+it('does not grant administrator access from the example environment', async () => {
+  const example = parse(await readFile(new URL('../../../.env.example', import.meta.url), 'utf8'));
+  Object.assign(process.env, example);
+  const { config } = await import('./config?t=' + Date.now());
+  expect(config.ADMIN_PUBKEYS).toEqual([]);
 });
 
 it('throws when an ADMIN_PUBKEYS entry is not valid hex', async () => {
@@ -153,17 +162,18 @@ export const config: Config = envSchema.parse(process.env);
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run src/lib/server/config.test.ts`
-Expected: PASS (9 tests — the prior 6 plus these 3)
+Expected: PASS (including the example-environment no-grant regression)
 
 - [ ] **Step 5: Update `.env.example` and your local `.env`**
 
 Append to `.env.example`:
 
 ```
-ADMIN_PUBKEYS=0000000000000000000000000000000000000000000000000000000000000000
+# Comma-separated 64-character lowercase-hex pubkeys. Configure your own admins.
+ADMIN_PUBKEYS=
 ```
 
-Add the same line to your local `.env` — every route test from Task 6 onward relies on this pubkey being a configured admin.
+For manual development only, add your own lowercase-hex pubkey to local `.env`. Vitest and Playwright inject independent test-only identities, so automated tests never depend on a developer allowlist.
 
 - [ ] **Step 6: Commit**
 
@@ -518,7 +528,8 @@ Expected: FAIL — `./adminQueries` does not exist.
 
 ```ts
 // src/lib/server/identifiers/adminQueries.ts
-import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../db';
 import { identifierEvents, identifiers } from '../db/schema';
 
@@ -548,36 +559,51 @@ export async function getStaleIdentifiers(referenceTime: Date | SQL = sql`now()`
     })
     .from(identifiers)
     .where(and(eq(identifiers.status, 'claimed'), staleIdentifierCondition(referenceTime)))
-    .orderBy(asc(identifiers.lastIdentifiedAt));
+    .orderBy(asc(identifiers.lastIdentifiedAt), asc(identifiers.name));
 }
 
 export async function getReservations(): Promise<Reservation[]> {
-  const rows = await db
-    .select({ name: identifiers.name, createdAt: identifiers.createdAt })
-    .from(identifiers)
-    .where(eq(identifiers.status, 'reserved'))
-    .orderBy(asc(identifiers.name));
+  const reservationEvent = alias(identifierEvents, 'reservation_event');
+  const newerReservationEvent = alias(identifierEvents, 'newer_reservation_event');
 
-  // N+1 by design: reservation counts are expected to be small for v1, and this
-  // keeps the "latest reserved event per name" lookup simple rather than a window-function query.
-  return Promise.all(
-    rows.map(async (row) => {
-      const [event] = await db
-        .select({ reason: identifierEvents.reason, actorPubkey: identifierEvents.actorPubkey })
-        .from(identifierEvents)
-        .where(and(eq(identifierEvents.identifierName, row.name), eq(identifierEvents.eventType, 'reserved')))
-        .orderBy(desc(identifierEvents.createdAt))
-        .limit(1);
-      return { ...row, reason: event?.reason ?? null, actorPubkey: event?.actorPubkey ?? null };
+  return db
+    .select({
+      name: identifiers.name,
+      createdAt: identifiers.createdAt,
+      reason: reservationEvent.reason,
+      actorPubkey: reservationEvent.actorPubkey
     })
-  );
+    .from(identifiers)
+    .leftJoin(
+      reservationEvent,
+      and(
+        eq(reservationEvent.identifierName, identifiers.name),
+        eq(reservationEvent.eventType, 'reserved')
+      )
+    )
+    .leftJoin(
+      newerReservationEvent,
+      and(
+        eq(newerReservationEvent.identifierName, identifiers.name),
+        eq(newerReservationEvent.eventType, 'reserved'),
+        or(
+          gt(newerReservationEvent.createdAt, reservationEvent.createdAt),
+          and(
+            eq(newerReservationEvent.createdAt, reservationEvent.createdAt),
+            gt(newerReservationEvent.id, reservationEvent.id)
+          )
+        )
+      )
+    )
+    .where(and(eq(identifiers.status, 'reserved'), isNull(newerReservationEvent.id)))
+    .orderBy(asc(identifiers.name));
 }
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run src/lib/server/identifiers/adminQueries.test.ts`
-Expected: PASS (2 tests)
+Expected: PASS, including equal-timestamp/id ordering, remove/recreate metadata, one-select, and stale-name tie-order regressions.
 
 - [ ] **Step 5: Commit**
 
@@ -614,7 +640,7 @@ import { db } from '../db';
 import { identifierEvents, identifiers } from '../db/schema';
 import { createAdminReservation } from './adminReservations';
 
-const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
+const ADMIN_PUBKEY = '0f'.repeat(32);
 const CREATE_NAME = 'admin-reservation-create';
 const CLAIMED_NAME = 'admin-reservation-claimed';
 const CLAIMED_OWNER = '5201000000000000000000000000000000000000000000000000000000000000';
@@ -767,7 +793,7 @@ import { db } from '$lib/server/db';
 import { identifierEvents, identifiers } from '$lib/server/db/schema';
 import { POST } from './+server';
 
-const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
+const ADMIN_PUBKEY = '0f'.repeat(32);
 const NON_ADMIN_PUBKEY = 'd'.repeat(64);
 const TEST_NAME = 'admin-reservation-test';
 const CLAIMED_OWNER = '5202000000000000000000000000000000000000000000000000000000000000';
@@ -1020,7 +1046,7 @@ import { db } from '$lib/server/db';
 import { identifierEvents, identifiers } from '$lib/server/db/schema';
 import { DELETE } from './+server';
 
-const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
+const ADMIN_PUBKEY = '0f'.repeat(32);
 const NON_ADMIN_PUBKEY = 'd'.repeat(64);
 const TEST_NAME = 'admin-reservation-delete-test';
 const CLAIMED_OWNER = '5301000000000000000000000000000000000000000000000000000000000000';
@@ -1142,7 +1168,7 @@ import { identifierEvents, identifiers } from '../db/schema';
 import { valkey } from '../valkey';
 import { forceReleaseAdminIdentifier } from './adminForceRelease';
 
-const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
+const ADMIN_PUBKEY = '0f'.repeat(32);
 const TEST_NAME = 'admin-service-force-release';
 const TEST_OWNER = '5401000000000000000000000000000000000000000000000000000000000000';
 const CACHE_KEY = 'identifier:' + TEST_NAME;
@@ -1324,7 +1350,7 @@ import { db } from '$lib/server/db';
 import { identifierEvents, identifiers } from '$lib/server/db/schema';
 import { POST } from './+server';
 
-const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
+const ADMIN_PUBKEY = '0f'.repeat(32);
 const NON_ADMIN_PUBKEY = 'e'.repeat(64);
 const TEST_NAME = 'admin-force-release-test';
 const TEST_OWNER = '5402000000000000000000000000000000000000000000000000000000000000';
@@ -1476,7 +1502,7 @@ import { db } from '$lib/server/db';
 import { identifiers } from '$lib/server/db/schema';
 import { load } from './+page.server';
 
-const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
+const ADMIN_PUBKEY = '0f'.repeat(32);
 const NON_ADMIN_PUBKEY = '1'.repeat(64);
 const TEST_NAME = 'admin-page-load-test';
 const TEST_OWNER = '5501000000000000000000000000000000000000000000000000000000000000';
@@ -1717,6 +1743,9 @@ Create `src/routes/admin/page.test.ts` in Happy DOM and mount the real Svelte co
 3. The force-release dialog is named by `Force release <name>?` and described by its visible consequence copy.
 4. The removal dialog is named by `Remove reservation for <name>?` and described by its visible consequence copy.
 5. Whitespace-only reason values leave Add reservation / Force release disabled; trimmed successful values are rendered from the server-normalized helper result.
+6. Successful creation announces `Reserved <normalized-name>.` through the existing polite live region.
+7. Repeated Force release/Remove launchers expose target-specific accessible names; pending dialog containers expose `aria-busy`, retain visible mint focus, and recover it after rejection.
+8. Compact row actions keep at least a 44px hit area for coarse pointers, and card/input/modal surfaces use `--color-paper` rather than hard-coded white.
 
 Run: `pnpm vitest run src/routes/admin/page.test.ts`
 
@@ -1755,6 +1784,7 @@ Expected: FAIL — `+page.svelte` does not exist.
   let destructiveLauncher = $state<HTMLButtonElement>();
   let destructiveSafeAction = $state<HTMLButtonElement>();
   let destructiveDialog = $state<HTMLDivElement>();
+  let adminStatus = $state('');
 
   let newReservationName = $state('');
   let newReservationReason = $state('');
@@ -1829,6 +1859,7 @@ Expected: FAIL — `+page.svelte` does not exist.
       const result = await createReservation(newReservationName, newReservationReason);
       if (result.ok) {
         reservations = [...reservations, result.value];
+        adminStatus = `Reserved ${result.value.name}.`;
         newReservationName = '';
         newReservationReason = '';
       } else {
@@ -1872,7 +1903,7 @@ Expected: FAIL — `+page.svelte` does not exist.
           <td>{row.name}</td>
           <td>{row.ownerPubkey}</td>
           <td>{new Date(row.lastIdentifiedAt).toLocaleDateString()}</td>
-          <td><button onclick={(event) => openReleaseModal(row.name, event.currentTarget)}>Force release</button></td>
+          <td><button aria-label={`Force release ${row.name}`} onclick={(event) => openReleaseModal(row.name, event.currentTarget)}>Force release</button></td>
         </tr>
       {/each}
     </tbody>
@@ -1889,7 +1920,7 @@ Expected: FAIL — `+page.svelte` does not exist.
           <td>{row.name}</td>
           <td>{row.reason}</td>
           <td>{row.actorPubkey}</td>
-          <td><button onclick={(event) => openReservationRemoval(row.name, event.currentTarget)}>Remove</button></td>
+          <td><button aria-label={`Remove reservation for ${row.name}`} onclick={(event) => openReservationRemoval(row.name, event.currentTarget)}>Remove</button></td>
         </tr>
       {/each}
     </tbody>
@@ -1909,6 +1940,7 @@ Expected: FAIL — `+page.svelte` does not exist.
   {#if reservationError}
     <p class="error" role="alert">{reservationError}</p>
   {/if}
+  <p class="sr-only" aria-live="polite">{adminStatus}</p>
 </CredentialCard>
 
 {#if releaseTarget}
@@ -1919,6 +1951,7 @@ Expected: FAIL — `+page.svelte` does not exist.
     aria-modal="true"
     aria-labelledby="force-release-title"
     aria-describedby="force-release-description"
+    aria-busy={releasePending}
     tabindex="-1"
     onkeydown={(event) => handleDestructiveKeydown(event, releasePending)}
   >
@@ -1952,6 +1985,7 @@ Expected: FAIL — `+page.svelte` does not exist.
     aria-modal="true"
     aria-labelledby="reservation-removal-title"
     aria-describedby="reservation-removal-description"
+    aria-busy={removalPending}
     tabindex="-1"
     onkeydown={(event) => handleDestructiveKeydown(event, removalPending)}
   >
@@ -1996,9 +2030,16 @@ Expected: FAIL — `+page.svelte` does not exist.
     justify-content: center;
   }
   .modal__content {
-    background: white;
+    background: var(--color-paper);
     max-width: 24rem;
     padding: var(--space-4);
+  }
+  .modal:focus-visible .modal__content {
+    outline: 2px solid var(--color-accent-mint);
+    outline-offset: 2px;
+  }
+  @media (pointer: coarse) {
+    .compact { min-height: 44px; min-width: 44px; }
   }
 </style>
 ```
@@ -2028,12 +2069,15 @@ git commit -m "feat: add /admin screen"
 ### Task 11: Playwright e2e — admin dashboard
 
 **Files:**
+- Modify: `playwright.config.ts`
+- Create: `tests/e2e/helpers/adminFixtures.ts`
 - Create: `tests/e2e/helpers/fixedAdminSigner.ts`
 - Create: `tests/e2e/admin-dashboard.spec.ts`
+- Test: `src/lib/server/identifiers/adminE2eFixtures.test.ts`
 
 **Interfaces:**
 - Consumes: the full stack from Tasks 1–10; `finalizeEvent`, `getPublicKey` from `nostr-tools`; `db`, `identifiers`, and `identifierEvents` for explicit e2e fixture setup and cleanup
-- Produces: `installFixedAdminExtension(page: Page): Promise<void>` and `signInAsFixedAdmin(page: Page): Promise<void>` from `tests/e2e/helpers/fixedAdminSigner.ts`; passing e2e coverage for both destructive Admin dialogs
+- Produces: `installFixedAdminExtension(page: Page): Promise<void>` and `signInAsFixedAdmin(page: Page): Promise<void>` from `tests/e2e/helpers/fixedAdminSigner.ts`; deterministic validator-safe names from `createAdminFixtures(testId, workerIndex, retry)`; Playwright-only allowlist/origin injection for both worker and preview server; passing e2e coverage for both destructive Admin dialogs
 
 - [ ] **Step 1: Write `tests/e2e/helpers/fixedAdminSigner.ts`**
 
@@ -2042,13 +2086,12 @@ git commit -m "feat: add /admin screen"
 import type { Page } from '@playwright/test';
 import { finalizeEvent, getPublicKey } from 'nostr-tools';
 
-// Fixed, not random: this pubkey must already be in .env's ADMIN_PUBKEYS before the
-// server starts, unlike the other e2e tests' fresh-random-keypair-per-run pattern.
+// Fixed, not random: Playwright authorizes this identity only in its worker and preview server.
 const FIXED_ADMIN_SECRET_KEY = new Uint8Array(32).fill(0xaa);
+export const FIXED_ADMIN_PUBKEY = getPublicKey(FIXED_ADMIN_SECRET_KEY);
 
 export async function installFixedAdminExtension(page: Page): Promise<void> {
-  const pubkey = getPublicKey(FIXED_ADMIN_SECRET_KEY);
-  await page.exposeFunction('__testGetPublicKey', () => pubkey);
+  await page.exposeFunction('__testGetPublicKey', () => FIXED_ADMIN_PUBKEY);
   await page.exposeFunction('__testSignEvent', (template: unknown) => {
     return finalizeEvent(template as Parameters<typeof finalizeEvent>[0], FIXED_ADMIN_SECRET_KEY);
   });
@@ -2071,7 +2114,9 @@ export async function signInAsFixedAdmin(page: Page): Promise<void> {
 }
 ```
 
-- [ ] **Step 2: Write the test**
+- [ ] **Step 2: Inject the test identity and write validator-safe fixtures/tests**
+
+`playwright.config.ts` imports `FIXED_ADMIN_PUBKEY`, assigns it plus the preview origin to `process.env`, repeats both values in `webServer.env`, and never reuses an unknown pre-existing preview server. `.env.example` remains empty. `adminFixtures.ts` hashes `${testId}:${workerIndex}:${retry}` to a 12-character suffix, builds `e2e-stale-<suffix>` / `e2e-reservation-<suffix>`, and throws unless each result matches the production format and 30-character maximum. The unit regression proves determinism, distinct targets, retry/test identity variance, and format/length.
 
 ```ts
 // tests/e2e/admin-dashboard.spec.ts
@@ -2079,48 +2124,59 @@ import { expect, test } from '@playwright/test';
 import { inArray } from 'drizzle-orm';
 import { db } from '../../src/lib/server/db';
 import { identifierEvents, identifiers } from '../../src/lib/server/db/schema';
+import { createAdminFixtures, type AdminFixtures } from './helpers/adminFixtures';
 import { signInAsFixedAdmin } from './helpers/fixedAdminSigner';
 
-const STALE_NAME = 'stale-e2e';
-const RESERVATION_NAME = 'e2e-admin-reservation';
-const FIXTURE_NAMES = [STALE_NAME, RESERVATION_NAME];
 const STALE_OWNER = '5601000000000000000000000000000000000000000000000000000000000000';
 const FORCE_RELEASE_ROUTE = '**/api/admin/force-release';
 const REMOVE_RESERVATION_ROUTE = '**/api/admin/reservations/*';
+const fixturesByTestId = new Map<string, AdminFixtures>();
 
-async function cleanAdminFixtures(): Promise<void> {
-  await db.delete(identifierEvents).where(inArray(identifierEvents.identifierName, FIXTURE_NAMES));
-  await db.delete(identifiers).where(inArray(identifiers.name, FIXTURE_NAMES));
+async function cleanAdminFixtures(fixtures: AdminFixtures): Promise<void> {
+  const names = [fixtures.staleName, fixtures.reservationName];
+  await db.delete(identifierEvents).where(inArray(identifierEvents.identifierName, names));
+  await db.delete(identifiers).where(inArray(identifiers.name, names));
 }
 
-async function seedStaleClaimedIdentifier(): Promise<void> {
+async function seedStaleClaimedIdentifier(name: string): Promise<void> {
   await db.insert(identifiers).values({
-    name: STALE_NAME,
+    name,
     status: 'claimed',
     ownerPubkey: STALE_OWNER,
     lastIdentifiedAt: new Date('2025-01-01T00:00:00.000Z')
   });
 }
 
-test.beforeEach(cleanAdminFixtures);
-test.afterEach(cleanAdminFixtures);
+test.beforeEach(async ({ browserName }, testInfo) => {
+  void browserName;
+  const fixtures = createAdminFixtures(testInfo.testId, testInfo.workerIndex, testInfo.retry);
+  fixturesByTestId.set(testInfo.testId, fixtures);
+  await cleanAdminFixtures(fixtures);
+});
+test.afterEach(async ({ browserName }, testInfo) => {
+  void browserName;
+  const fixtures = fixturesByTestId.get(testInfo.testId);
+  if (fixtures) await cleanAdminFixtures(fixtures);
+});
 
-test('reservation removal contains focus and recovers from a rejected request', async ({ page }) => {
+test('reservation removal contains focus and recovers from a rejected request', async ({ page }, testInfo) => {
+  const { reservationName } = fixturesByTestId.get(testInfo.testId)!;
   await signInAsFixedAdmin(page);
 
   await page.goto('/admin');
   await expect(page.getByRole('heading', { name: 'Stale identifiers' })).toBeVisible();
 
-  await page.getByLabel('Name', { exact: true }).fill(RESERVATION_NAME);
+  await page.getByLabel('Name', { exact: true }).fill(reservationName);
   await page.getByLabel('Reason', { exact: true }).fill('e2e test reservation');
   await page.getByRole('button', { name: 'Add reservation' }).click();
-  const reservationRow = page.getByRole('row', { name: new RegExp(RESERVATION_NAME) });
+  const reservationRow = page.getByRole('row', { name: new RegExp(reservationName) });
   await expect(reservationRow).toBeVisible();
 
-  const launcher = reservationRow.getByRole('button', { name: 'Remove', exact: true });
+  const launcher = reservationRow.getByRole('button', { name: `Remove reservation for ${reservationName}`, exact: true });
   await launcher.click();
   const dialog = page.getByRole('dialog', {
-    name: `Remove reservation for ${RESERVATION_NAME}?`
+    name: `Remove reservation for ${reservationName}?`,
+    exact: true
   });
   await expect(dialog).toHaveAccessibleDescription(
     'This makes the name available for anyone else to claim.'
@@ -2186,21 +2242,22 @@ test('reservation removal contains focus and recovers from a rejected request', 
   await expect(reservationRow).toBeHidden();
 });
 
-test('force release contains focus and recovers from a rejected request', async ({ page }) => {
+test('force release contains focus and recovers from a rejected request', async ({ page }, testInfo) => {
+  const { staleName } = fixturesByTestId.get(testInfo.testId)!;
   await signInAsFixedAdmin(page);
-  await seedStaleClaimedIdentifier();
+  await seedStaleClaimedIdentifier(staleName);
   await page.goto('/admin');
 
-  const staleRow = page.getByRole('row', { name: new RegExp(STALE_NAME) });
+  const staleRow = page.getByRole('row', { name: new RegExp(staleName) });
   await expect(staleRow).toBeVisible();
-  const launcher = staleRow.getByRole('button', { name: 'Force release', exact: true });
+  const launcher = staleRow.getByRole('button', { name: `Force release ${staleName}`, exact: true });
   await launcher.click();
-  const dialog = page.getByRole('dialog', { name: `Force release ${STALE_NAME}?` });
+  const dialog = page.getByRole('dialog', { name: `Force release ${staleName}?`, exact: true });
   await expect(dialog).toHaveAccessibleDescription(
     'This makes the identifier available for anyone else to claim and cannot be undone.'
   );
   const reason = dialog.getByLabel('Reason (required)');
-  const action = dialog.getByRole('button', { name: `Force release ${STALE_NAME}` });
+  const action = dialog.getByRole('button', { name: `Force release ${staleName}` });
   const cancel = dialog.getByRole('button', { name: 'Cancel' });
 
   await expect(cancel).toBeFocused();
@@ -2269,13 +2326,15 @@ test('force release contains focus and recovers from a rejected request', async 
 
 - [ ] **Step 3: Run the full e2e suite**
 
-Run: `PUBLIC_ORIGIN=http://localhost:4173 pnpm test:e2e`
-Expected: zero failures from the discovered Playwright suite. The remaining-work preflight restores `.env`, whose `ADMIN_PUBKEYS` includes `0000000000000000000000000000000000000000000000000000000000000000`; the command override aligns auth validation with Playwright's preview port.
+Run: `pnpm test:e2e`
+Expected: zero failures on a provisioned host. Playwright config itself aligns the fixed test allowlist and preview origin in both processes, independent of `.env.example`.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add tests/e2e/helpers/fixedAdminSigner.ts tests/e2e/admin-dashboard.spec.ts
+git add playwright.config.ts tests/e2e/helpers/adminFixtures.ts \
+  tests/e2e/helpers/fixedAdminSigner.ts tests/e2e/admin-dashboard.spec.ts \
+  src/lib/server/identifiers/adminE2eFixtures.test.ts
 git commit -m "test: add e2e coverage for the admin dashboard"
 ```
 

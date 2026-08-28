@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../db';
 import { identifierEvents, identifiers } from '../db/schema';
 
@@ -31,32 +32,42 @@ export async function getStaleIdentifiers(
     })
     .from(identifiers)
     .where(and(eq(identifiers.status, 'claimed'), staleIdentifierCondition(referenceTime)))
-    .orderBy(asc(identifiers.lastIdentifiedAt));
+    .orderBy(asc(identifiers.lastIdentifiedAt), asc(identifiers.name));
 }
 
 export async function getReservations(): Promise<Reservation[]> {
-  const rows = await db
-    .select({ name: identifiers.name, createdAt: identifiers.createdAt })
-    .from(identifiers)
-    .where(eq(identifiers.status, 'reserved'))
-    .orderBy(asc(identifiers.name));
+  const reservationEvent = alias(identifierEvents, 'reservation_event');
+  const newerReservationEvent = alias(identifierEvents, 'newer_reservation_event');
 
-  // N+1 by design: reservation counts are expected to be small for v1, and this
-  // keeps the "latest reserved event per name" lookup simple rather than a window-function query.
-  return Promise.all(
-    rows.map(async (row) => {
-      const [event] = await db
-        .select({ reason: identifierEvents.reason, actorPubkey: identifierEvents.actorPubkey })
-        .from(identifierEvents)
-        .where(
+  return db
+    .select({
+      name: identifiers.name,
+      createdAt: identifiers.createdAt,
+      reason: reservationEvent.reason,
+      actorPubkey: reservationEvent.actorPubkey
+    })
+    .from(identifiers)
+    .leftJoin(
+      reservationEvent,
+      and(
+        eq(reservationEvent.identifierName, identifiers.name),
+        eq(reservationEvent.eventType, 'reserved')
+      )
+    )
+    .leftJoin(
+      newerReservationEvent,
+      and(
+        eq(newerReservationEvent.identifierName, identifiers.name),
+        eq(newerReservationEvent.eventType, 'reserved'),
+        or(
+          gt(newerReservationEvent.createdAt, reservationEvent.createdAt),
           and(
-            eq(identifierEvents.identifierName, row.name),
-            eq(identifierEvents.eventType, 'reserved')
+            eq(newerReservationEvent.createdAt, reservationEvent.createdAt),
+            gt(newerReservationEvent.id, reservationEvent.id)
           )
         )
-        .orderBy(desc(identifierEvents.createdAt), desc(identifierEvents.id))
-        .limit(1);
-      return { ...row, reason: event?.reason ?? null, actorPubkey: event?.actorPubkey ?? null };
-    })
-  );
+      )
+    )
+    .where(and(eq(identifiers.status, 'reserved'), isNull(newerReservationEvent.id)))
+    .orderBy(asc(identifiers.name));
 }

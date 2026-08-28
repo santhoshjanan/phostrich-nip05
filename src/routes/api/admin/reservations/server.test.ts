@@ -4,7 +4,7 @@ import { db } from '$lib/server/db';
 import { identifierEvents, identifiers } from '$lib/server/db/schema';
 import { POST } from './+server';
 
-const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
+const ADMIN_PUBKEY = '0f'.repeat(32);
 const NON_ADMIN_PUBKEY = 'd'.repeat(64);
 const TEST_NAME = 'admin-reservation-test';
 const CLAIMED_OWNER = '5202000000000000000000000000000000000000000000000000000000000000';

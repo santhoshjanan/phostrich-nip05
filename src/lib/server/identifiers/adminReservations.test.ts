@@ -4,7 +4,7 @@ import { db } from '../db';
 import { identifierEvents, identifiers } from '../db/schema';
 import { createAdminReservation, removeAdminReservation } from './adminReservations';
 
-const ADMIN_PUBKEY = '0000000000000000000000000000000000000000000000000000000000000000';
+const ADMIN_PUBKEY = '0f'.repeat(32);
 const CREATE_NAME = 'admin-reservation-create';
 const CLAIMED_NAME = 'admin-reservation-claimed';
 const CLAIMED_OWNER = '5201000000000000000000000000000000000000000000000000000000000000';

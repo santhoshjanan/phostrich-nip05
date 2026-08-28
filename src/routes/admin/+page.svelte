@@ -142,6 +142,7 @@
       );
       if (result.ok) {
         reservations = [...reservations, result.value];
+        adminStatus = `Reserved ${result.value.name}.`;
         newReservationName = '';
         newReservationReason = '';
       } else {
@@ -205,6 +206,7 @@
                 <td class="row-action">
                   <button
                     class="secondary compact"
+                    aria-label={`Force release ${row.name}`}
                     onclick={(event) => openReleaseModal(row.name, event.currentTarget)}
                     >Force release</button
                   >
@@ -246,6 +248,7 @@
                 <td class="row-action">
                   <button
                     class="secondary compact"
+                    aria-label={`Remove reservation for ${row.name}`}
                     onclick={(event) => openReservationRemoval(row.name, event.currentTarget)}
                     >Remove</button
                   >
@@ -295,6 +298,7 @@
     aria-modal="true"
     aria-labelledby="force-release-title"
     aria-describedby="force-release-description"
+    aria-busy={releasePending}
     tabindex="-1"
     onkeydown={(event) => handleDestructiveKeydown(event, releasePending)}
   >
@@ -341,6 +345,7 @@
     aria-modal="true"
     aria-labelledby="reservation-removal-title"
     aria-describedby="reservation-removal-description"
+    aria-busy={removalPending}
     tabindex="-1"
     onkeydown={(event) => handleDestructiveKeydown(event, removalPending)}
   >
@@ -419,7 +424,7 @@
   }
   .table-scroll {
     overflow-x: auto;
-    scrollbar-color: var(--color-line) white;
+    scrollbar-color: var(--color-line) var(--color-paper);
     scrollbar-width: thin;
   }
   table {
@@ -493,8 +498,12 @@
   .modal:focus {
     outline: none;
   }
+  .modal:focus-visible .modal__content {
+    outline: 2px solid var(--color-accent-mint);
+    outline-offset: 2px;
+  }
   .modal__content {
-    background: white;
+    background: var(--color-paper);
     border: 1px solid var(--color-line);
     max-height: calc(100dvh - var(--space-2) - var(--space-2));
     max-width: 24rem;
@@ -581,6 +590,12 @@
   @media (max-height: 32rem) {
     .modal {
       align-items: flex-start;
+    }
+  }
+  @media (pointer: coarse) {
+    .compact {
+      min-height: 44px;
+      min-width: 44px;
     }
   }
 </style>

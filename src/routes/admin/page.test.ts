@@ -241,6 +241,15 @@ describe('admin reservation creation', () => {
     });
     expect(input('Name').value).toBe('');
     expect(input('Reason').value).toBe('');
+    const status = document.querySelector<HTMLElement>('[aria-live="polite"]');
+    expect(status?.textContent?.trim()).toBe('Reserved normalized-name.');
+  });
+
+  it('gives repeated row actions target-specific accessible names', () => {
+    renderAdmin();
+
+    expect(button('Force release').getAttribute('aria-label')).toBe('Force release alice');
+    expect(button('Remove').getAttribute('aria-label')).toBe('Remove reservation for support');
   });
 });
 
@@ -338,6 +347,7 @@ describe('force-release dialog', () => {
     await tick();
 
     expect(document.activeElement).toBe(dialog());
+    expect(dialog().getAttribute('aria-busy')).toBe('true');
     expect(button('Releasing…').disabled).toBe(true);
     expect(button('Cancel').disabled).toBe(true);
     button('Releasing…').click();
@@ -356,6 +366,7 @@ describe('force-release dialog', () => {
     expect(button('Force release alice').disabled).toBe(false);
     expect(button('Cancel').disabled).toBe(false);
     expect(document.activeElement).toBe(button('Cancel'));
+    expect(dialog().getAttribute('aria-busy')).toBe('false');
     expect(document.body.textContent).toContain('alice');
   });
 
@@ -430,6 +441,7 @@ describe('reservation-removal dialog', () => {
     await tick();
 
     expect(document.activeElement).toBe(dialog());
+    expect(dialog().getAttribute('aria-busy')).toBe('true');
     expect(button('Removing…').disabled).toBe(true);
     expect(button('Cancel').disabled).toBe(true);
     button('Removing…').click();
@@ -448,6 +460,7 @@ describe('reservation-removal dialog', () => {
     expect(button('Remove reservation').disabled).toBe(false);
     expect(button('Cancel').disabled).toBe(false);
     expect(document.activeElement).toBe(button('Cancel'));
+    expect(dialog().getAttribute('aria-busy')).toBe('false');
     expect(document.body.textContent).toContain('support');
   });
 

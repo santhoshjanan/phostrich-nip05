@@ -18,7 +18,7 @@
   .credential-card {
     max-width: 28rem;
     width: 100%;
-    background: white;
+    background: var(--color-paper);
     border: 1px solid var(--color-line);
     padding: var(--space-4);
   }

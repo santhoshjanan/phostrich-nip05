@@ -63,6 +63,22 @@ New env for e2e only: `PUBLIC_ORIGIN` must match wherever `pnpm preview` actuall
 - Admin actions are always audit-logged to `identifier_events` with the acting admin's pubkey.
 - Production deployments must set `ADMIN_PUBKEYS` to their own comma-separated, 64-character lowercase-hex pubkeys. The example environment intentionally grants no administrator access; the checked-in fixed signer is authorized only by the Playwright/CI test environment.
 
+## CI/CD
+
+Every push and PR runs three GitHub Actions jobs: `lint-and-check`, `test` (full suite against real Postgres/Valkey service containers, plus e2e), and `docker-build` (validates the production image builds).
+
+### Production deployment
+
+    cp .env.example .env   # fill in real values: DATABASE_URL, VALKEY_URL,
+                           # PUBLIC_ORIGIN, POSTGRES_PASSWORD, ADMIN_PUBKEYS
+    docker compose -f docker-compose.prod.yml up -d --build
+
+`DATABASE_URL` and `VALKEY_URL` must point at the compose service names — e.g.
+`postgres://phostrich:$POSTGRES_PASSWORD@postgres:5432/phostrich` and
+`redis://valkey:6379`. Postgres and Valkey are not exposed outside the compose
+network. Caddy handles TLS automatically for the domain in `PUBLIC_ORIGIN`.
+Deployment is manual for v1 — no CI step deploys automatically yet.
+
 ## Other commands
 
     pnpm check        # svelte-check + TypeScript

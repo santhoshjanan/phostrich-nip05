@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { tick } from 'svelte';
   import { fade, scale } from 'svelte/transition';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
   import {
@@ -20,6 +21,9 @@
   let showReleaseModal = $state(false);
   let releaseStatus = $state<'idle' | 'releasing'>('idle');
   let releaseError = $state('');
+  let releaseLauncher = $state<HTMLButtonElement>();
+  let releaseAction = $state<HTMLButtonElement>();
+  let releaseCancel = $state<HTMLButtonElement>();
 
   const lastVerifiedDate = $derived(
     new Date(data.lastIdentifiedAt).toLocaleDateString(undefined, {
@@ -101,6 +105,36 @@
   function openReleaseModal() {
     releaseError = '';
     showReleaseModal = true;
+    void tick().then(() => releaseCancel?.focus());
+  }
+
+  function closeReleaseModal() {
+    if (releaseStatus === 'releasing') return;
+
+    showReleaseModal = false;
+    releaseError = '';
+    void tick().then(() => releaseLauncher?.focus());
+  }
+
+  function handleReleaseKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      if (releaseStatus === 'releasing') return;
+
+      event.preventDefault();
+      closeReleaseModal();
+      return;
+    }
+
+    if (event.key !== 'Tab' || releaseStatus === 'releasing') return;
+
+    event.preventDefault();
+    const currentTarget = document.activeElement;
+    if (event.shiftKey) {
+      (currentTarget === releaseCancel ? releaseAction : releaseCancel)?.focus();
+      return;
+    }
+
+    (currentTarget === releaseAction ? releaseCancel : releaseAction)?.focus();
   }
 
   async function confirmRelease() {
@@ -108,14 +142,18 @@
 
     releaseStatus = 'releasing';
     releaseError = '';
-    const result = await releaseIdentifier();
-    if (result.ok) {
-      await goto('/claim');
-      return;
-    }
+    try {
+      const result = await releaseIdentifier();
+      if (result.ok) {
+        await goto('/claim');
+        return;
+      }
 
-    releaseError = 'We could not release this identifier. Please try again.';
-    releaseStatus = 'idle';
+      releaseError = result.error;
+    } finally {
+      if (releaseStatus === 'releasing') releaseStatus = 'idle';
+      if (releaseError) void tick().then(() => releaseAction?.focus());
+    }
   }
 </script>
 
@@ -125,9 +163,10 @@
     <span class="identifier">{data.name}</span>
   </div>
   <div class="ledger-row">
-    <span class="ledger-label">Last verified</span>
+    <span class="ledger-label">Last NIP-05 lookup</span>
     <span class="ledger-value">{lastVerifiedDate}</span>
   </div>
+  <p class="inactivity-note">Public lookups keep this identifier active.</p>
   <div class="ledger-row">
     <span class="ledger-label">Eligible for release after</span>
     <span class="ledger-value">{eligibleDate}</span>
@@ -177,7 +216,7 @@
   <section class="release" aria-labelledby="release-heading">
     <h2 id="release-heading">Release identifier</h2>
     <p>Releasing it immediately makes {data.name} available for anyone else to claim.</p>
-    <button class="secondary release-button" onclick={openReleaseModal}
+    <button bind:this={releaseLauncher} class="secondary release-button" onclick={openReleaseModal}
       >Release this identifier</button
     >
   </section>
@@ -190,6 +229,8 @@
     aria-modal="true"
     aria-labelledby="release-modal-title"
     aria-describedby="release-modal-description"
+    tabindex="-1"
+    onkeydown={handleReleaseKeydown}
     transition:fade={{ duration: 200 }}
   >
     <div class="modal__content" transition:scale={{ duration: 200, start: 0.98 }}>
@@ -204,12 +245,13 @@
         <p class="error" role="alert">{releaseError}</p>
       {/if}
       <div class="modal__actions">
-        <button onclick={confirmRelease} disabled={releaseStatus === 'releasing'}>
+        <button bind:this={releaseAction} onclick={confirmRelease} disabled={releaseStatus === 'releasing'}>
           {releaseStatus === 'releasing' ? 'Releasing…' : `Release ${data.name}`}
         </button>
         <button
           class="secondary"
-          onclick={() => (showReleaseModal = false)}
+          bind:this={releaseCancel}
+          onclick={closeReleaseModal}
           disabled={releaseStatus === 'releasing'}
         >
           Cancel
@@ -241,6 +283,7 @@
     font-weight: 600;
     margin: 0;
   }
+  .inactivity-note,
   .relay-note,
   .release p {
     color: var(--color-ink-muted);
@@ -311,6 +354,7 @@
     border: 1px solid var(--color-line);
     max-width: 24rem;
     padding: var(--space-4);
+    width: 100%;
   }
   .modal__header {
     border-bottom: 1px solid var(--color-line);

@@ -3,6 +3,23 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
 import AccountPage from './+page.svelte';
 
+if (!HTMLElement.prototype.animate) {
+  Object.defineProperty(HTMLElement.prototype, 'animate', {
+    configurable: true,
+    value: () => {
+      const animation = {
+        cancel: () => {},
+        currentTime: 0,
+        effect: null,
+        onfinish: null as (() => void) | null,
+        playState: 'finished'
+      };
+      queueMicrotask(() => animation.onfinish?.());
+      return animation;
+    }
+  });
+}
+
 const { goto } = vi.hoisted(() => ({ goto: vi.fn() }));
 
 vi.mock('$app/navigation', () => ({ goto }));
@@ -25,6 +42,16 @@ function button(label: string, occurrence = 0): HTMLButtonElement {
   )[occurrence];
   if (!result) throw new Error(`Could not find button: ${label}`);
   return result;
+}
+
+function dialog(): HTMLElement {
+  const result = document.querySelector<HTMLElement>('[role="dialog"]');
+  if (!result) throw new Error('Could not find release dialog');
+  return result;
+}
+
+function pressKey(target: Element, key: string, shiftKey = false) {
+  target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, shiftKey }));
 }
 
 function relayInput(index: number): HTMLInputElement {
@@ -235,5 +262,91 @@ describe('account relay editor', () => {
 
     button('Save relays').click();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('account release dialog', () => {
+  it('focuses Cancel when the dialog opens', async () => {
+    renderAccount();
+
+    const launcher = button('Release this identifier');
+    launcher.focus();
+    launcher.click();
+    await tick();
+
+    expect(document.activeElement).toBe(button('Cancel'));
+  });
+
+  it('traps dialog Tab and Shift+Tab navigation between its actions', async () => {
+    renderAccount();
+
+    button('Release this identifier').click();
+    await tick();
+    const cancel = button('Cancel');
+    const release = button('Release alice');
+
+    pressKey(cancel, 'Tab');
+    expect(document.activeElement).toBe(release);
+    pressKey(release, 'Tab');
+    expect(document.activeElement).toBe(cancel);
+    pressKey(cancel, 'Tab', true);
+    expect(document.activeElement).toBe(release);
+  });
+
+  it('closes on idle Escape and restores focus to the release launcher', async () => {
+    renderAccount();
+
+    const launcher = button('Release this identifier');
+    launcher.focus();
+    launcher.click();
+    await tick();
+    pressKey(button('Cancel'), 'Escape');
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+
+    expect(document.activeElement).toBe(launcher);
+  });
+
+  it('does not close the dialog when its backdrop is clicked', async () => {
+    renderAccount();
+
+    button('Release this identifier').click();
+    await tick();
+    expect(dialog().getAttribute('tabindex')).toBe('-1');
+    dialog().click();
+    await tick();
+
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it('keeps the dialog usable after a rejected release request', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('network detail'))));
+    renderAccount();
+
+    button('Release this identifier').click();
+    await tick();
+    button('Release alice').click();
+
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain(
+        'Could not reach the server. Check your connection and try again.'
+      )
+    );
+    await tick();
+
+    const release = button('Release alice');
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(release.disabled).toBe(false);
+    expect(document.body.textContent).not.toContain('Releasing…');
+    expect(dialog().contains(document.activeElement)).toBe(true);
+  });
+});
+
+describe('account inactivity evidence', () => {
+  it('explains lookup-driven release eligibility', () => {
+    renderAccount();
+
+    expect(document.body.textContent).toContain('Last NIP-05 lookup');
+    expect(document.body.textContent).toContain('Public lookups keep this identifier active.');
+    expect(document.body.textContent).toContain('Eligible for release after');
   });
 });

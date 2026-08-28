@@ -1,7 +1,28 @@
+# Homelab production deployment.
+#
+# Diverges from the upstream self-contained prod compose: this host runs one
+# shared platform stack (/root/platform), so the app joins the external
+# `backend` network to reach the shared Postgres + Valkey and the external
+# `web` network so the platform Traefik can route to it. No bundled postgres/
+# valkey services, no published ports.
+#
+# Public hostnames phostrich.com + www.phostrich.com -> this container:3000,
+# declared in /root/platform/traefik/dynamic/dynamic.yml (file provider).
+# Traefik must pass /.well-known/nostr.json through untouched — no redirect,
+# and it must not strip the app's Access-Control-Allow-Origin header.
+
+networks:
+  backend:
+    external: true
+  web:
+    external: true
+
 services:
   app:
     build: .
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       DATABASE_URL: ${DATABASE_URL}
       VALKEY_URL: ${VALKEY_URL}
@@ -10,12 +31,18 @@ services:
       DEFAULT_RELAYS: ${DEFAULT_RELAYS}
       SESSION_TTL_DAYS: ${SESSION_TTL_DAYS}
       ADMIN_PUBKEYS: ${ADMIN_PUBKEYS}
-    # No published ports: the app listens on 3000 inside the compose network and
-    # expects an external reverse proxy (Traefik, etc.) to terminate TLS and
-    # route to it. The proxy must pass /.well-known/nostr.json through untouched
-    # — no redirect, and keep the app's Access-Control-Allow-Origin header.
+      # adapter-node sits behind Traefik: trust its forwarded headers so
+      # origin checks and getClientAddress()-based rate limiting are correct.
+      PROTOCOL_HEADER: x-forwarded-proto
+      HOST_HEADER: x-forwarded-host
+      ADDRESS_HEADER: x-forwarded-for
+      XFF_DEPTH: '1'
     expose:
       - '3000'
+    networks:
+      - default
+      - backend
+      - web
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -30,6 +57,8 @@ services:
   migrate:
     build: .
     command: ['pnpm', 'db:migrate']
+    env_file:
+      - .env
     # DATABASE_URL is all the migration itself uses, but scripts/migrate.ts
     # imports src/lib/server/db, which loads config.ts and validates the full
     # env schema at module load — so VALKEY_URL and PUBLIC_ORIGIN must be present.
@@ -37,28 +66,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       VALKEY_URL: ${VALKEY_URL}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: phostrich
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: phostrich
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U phostrich']
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  valkey:
-    image: valkey/valkey:8-alpine
-    restart: unless-stopped
-
-volumes:
-  postgres-data:
+    networks:
+      - default
+      - backend
+    restart: 'no'

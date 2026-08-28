@@ -52,13 +52,13 @@ describe('saveRelays', () => {
       'fetch',
       vi.fn(
         async () =>
-          new Response(JSON.stringify({ error: 'relay 1: not a valid URL' }), { status: 400 })
+          new Response(JSON.stringify({ error: 'relay 1: must be a valid URL' }), { status: 400 })
       )
     );
 
     await expect(saveRelays(['bad'])).resolves.toEqual({
       ok: false,
-      error: 'relay 1: not a valid URL'
+      error: 'relay 1: must be a valid URL'
     });
   });
 

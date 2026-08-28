@@ -74,6 +74,9 @@
 </CredentialCard>
 
 <style>
+  #bunker-uri {
+    margin-bottom: var(--space-2);
+  }
   .error {
     color: var(--color-accent-rose-text);
     font-size: 0.875rem;

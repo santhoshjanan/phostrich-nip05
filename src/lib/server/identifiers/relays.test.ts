@@ -29,7 +29,7 @@ describe('validateRelayList', () => {
   it('rejects malformed relay URLs', () => {
     expect(validateRelayList(['not-a-url'])).toEqual({
       ok: false,
-      error: 'relay 1: not a valid URL'
+      error: 'relay 1: must be a valid URL'
     });
   });
 

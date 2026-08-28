@@ -63,7 +63,7 @@
   .app-frame {
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
+    flex: 1;
   }
 
   .masthead {

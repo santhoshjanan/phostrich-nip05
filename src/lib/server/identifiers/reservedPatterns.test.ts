@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isClaimableName } from './reservedPatterns';
+import { isClaimableName, isValidNameFormat } from './reservedPatterns';
 
 describe('isClaimableName', () => {
   it('accepts a normal lowercase name', () => {
@@ -38,5 +38,20 @@ describe('isClaimableName', () => {
     expect(isClaimableName('us-gov')).toBe(false);
     expect(isClaimableName('gov')).toBe(false);
     expect(isClaimableName('governor')).toBe(true);
+  });
+});
+
+describe('isValidNameFormat', () => {
+  it('accepts ordinary names and reserved words', () => {
+    expect(isValidNameFormat('alice')).toBe(true);
+    expect(isValidNameFormat('admin')).toBe(true);
+  });
+
+  it('retains the claim format constraints without applying the blocklist', () => {
+    expect(isValidNameFormat('a')).toBe(false);
+    expect(isValidNameFormat('a'.repeat(31))).toBe(false);
+    expect(isValidNameFormat('Alice')).toBe(false);
+    expect(isValidNameFormat('.alice')).toBe(false);
+    expect(isValidNameFormat('al..ice')).toBe(false);
   });
 });

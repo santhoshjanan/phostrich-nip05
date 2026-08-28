@@ -19,13 +19,18 @@ const NAME_FORMAT = /^[a-z0-9._-]+$/;
 const MIN_LENGTH = 2;
 const MAX_LENGTH = 30;
 
-export function isClaimableName(name: string): boolean {
+export function isValidNameFormat(name: string): boolean {
   if (name.length < MIN_LENGTH || name.length > MAX_LENGTH) return false;
   if (!NAME_FORMAT.test(name)) return false;
   if (name.startsWith('.') || name.endsWith('.')) return false;
   if (name.startsWith('-') || name.endsWith('-')) return false;
   if (name.startsWith('_') || name.endsWith('_')) return false;
   if (name.includes('..')) return false;
+  return true;
+}
+
+export function isClaimableName(name: string): boolean {
+  if (!isValidNameFormat(name)) return false;
   if (RESERVED_EXACT.has(name)) return false;
   if (RESERVED_PATTERNS.some((pattern) => pattern.test(name))) return false;
   return true;

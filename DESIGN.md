@@ -77,7 +77,7 @@ components:
     textColor: '{colors.ink}'
     rounded: '{rounded.sharp}'
     padding: '{spacing.4}'
-    width: '28rem'
+    width: '42rem'
 ---
 
 # Design System: Phostrich Claim Flow
@@ -148,7 +148,7 @@ A near-monochrome charcoal-plum-on-lavender ground with two hue-locked pastel ac
 
 ## Layout
 
-A single flow: one card, centered. `.page-center` is a full-viewport flex container (`min-height: 100vh`) that centers its one child both axes, with `space-3 space-2` (1.5rem/1rem) outer padding for small viewports. The card (`.credential-card`) caps at `max-width: 28rem` and otherwise fills available width — there is no multi-column or grid layout anywhere in the flow. The policy modal follows the same centered-overlay pattern at a tighter `max-width: 24rem`.
+Two layout contexts. Chrome-free routes (`/login`, `/claimed`) center one card both axes in `.screen-center` (`min-height: 100vh` flex). Authenticated routes (`/account`, `/claim`, `/admin`) sit under a hairline masthead in `.app-main`: a top-aligned column whose left edge lines up with the masthead wordmark — `max-width: 42rem`, widening to `64rem` on `/admin` for its table-scale card. The card (`.credential-card`) caps at `max-width: 42rem` (`64rem` in its `--wide` variant) and otherwise fills its column. The policy modal follows the centered-overlay pattern at a tighter `max-width: 24rem`.
 
 Internal rhythm runs on the four-step spacing scale (`0.5rem / 1rem / 1.5rem / 2.5rem`): card padding is the largest step (2.5rem); ledger-row gaps and label-to-input gaps use the 1rem step; action button spacing above content uses the 1.5rem step; the tightest step separates a label from its value. Ledger rows stack via `margin-top` + `border-top`, so the rhythm is additive top-down, matching a document's line-by-line reading order.
 

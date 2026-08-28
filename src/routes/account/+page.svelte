@@ -2,41 +2,63 @@
   import { goto } from '$app/navigation';
   import { fade, scale } from 'svelte/transition';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
-  import { eligibleForReleaseDate, releaseIdentifier, saveRelays } from '$lib/client/accountForm';
+  import {
+    eligibleForReleaseDate,
+    parseRelayError,
+    releaseIdentifier,
+    saveRelays
+  } from '$lib/client/accountForm';
 
   let { data } = $props<{ data: { name: string; relays: string[]; lastIdentifiedAt: string } }>();
 
-  // svelte-ignore state_referenced_locally -- relay inputs intentionally own an editable initial draft
-  let relays = $state<string[]>([...data.relays]);
+  let relays = $state<string[]>([]);
   let saveError = $state('');
   let saveStatus = $state<'idle' | 'saving' | 'saved'>('idle');
+  let relayErrorIndex = $state<number | null>(null);
+  let relayErrorMessage = $state('');
   let showReleaseModal = $state(false);
   let releaseStatus = $state<'idle' | 'releasing'>('idle');
   let releaseError = $state('');
 
-  const lastVerifiedDate = $derived(new Date(data.lastIdentifiedAt).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  }));
-  const eligibleDate = $derived(eligibleForReleaseDate(data.lastIdentifiedAt).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  }));
+  const lastVerifiedDate = $derived(
+    new Date(data.lastIdentifiedAt).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  );
+  const eligibleDate = $derived(
+    eligibleForReleaseDate(data.lastIdentifiedAt).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  );
+
+  $effect(() => {
+    relays = [...data.relays];
+  });
+
+  function markRelaysDirty() {
+    saveStatus = 'idle';
+    saveError = '';
+    relayErrorIndex = null;
+    relayErrorMessage = '';
+  }
 
   function addRelay() {
+    markRelaysDirty();
     if (relays.length < 8) relays = [...relays, ''];
   }
 
   function removeRelay(index: number) {
+    markRelaysDirty();
     relays = relays.filter((_, relayIndex) => relayIndex !== index);
-    saveStatus = 'idle';
   }
 
   function updateRelay(index: number, value: string) {
+    markRelaysDirty();
     relays = relays.map((relay, relayIndex) => (relayIndex === index ? value : relay));
-    saveStatus = 'idle';
   }
 
   async function save() {
@@ -44,15 +66,29 @@
 
     saveStatus = 'saving';
     saveError = '';
-    const result = await saveRelays(relays.filter((relay) => relay.trim().length > 0));
-    if (result.ok) {
-      relays = result.relays;
-      saveStatus = 'saved';
-      return;
-    }
+    relayErrorIndex = null;
+    relayErrorMessage = '';
+    try {
+      const result = await saveRelays(relays.filter((relay) => relay.trim().length > 0));
+      if (result.ok) {
+        relays = result.relays;
+        saveStatus = 'saved';
+        return;
+      }
 
-    saveError = result.error;
-    saveStatus = 'idle';
+      const relayError = parseRelayError(result.error);
+      if (relayError && relayError.index < relays.length) {
+        relayErrorIndex = relayError.index;
+        relayErrorMessage = relayError.message;
+        return;
+      }
+
+      saveError = result.error;
+    } catch {
+      saveError = 'We could not save your relays. Please try again.';
+    } finally {
+      if (saveStatus === 'saving') saveStatus = 'idle';
+    }
   }
 
   function openReleaseModal() {
@@ -92,7 +128,7 @@
 
   <section class="relays" aria-labelledby="relays-heading">
     <h2 id="relays-heading">Relays</h2>
-    <p class="relay-note">Your public relay list helps Nostr clients find you.</p>
+    <p class="relay-note">Public · wss:// only · {relays.length} of 8</p>
 
     {#each relays as relay, index}
       <div class="relay-row">
@@ -104,9 +140,16 @@
           value={relay}
           oninput={(event) => updateRelay(index, event.currentTarget.value)}
           placeholder="wss://relay.example"
+          aria-invalid={relayErrorIndex === index ? 'true' : undefined}
+          aria-describedby={relayErrorIndex === index ? `relay-${index}-error` : undefined}
         />
         <button class="secondary remove-button" onclick={() => removeRelay(index)}>Remove</button>
       </div>
+      {#if relayErrorIndex === index}
+        <p id={`relay-${index}-error`} class="error relay-error" role="alert">
+          {relayErrorMessage}
+        </p>
+      {/if}
     {/each}
 
     {#if relays.length < 8}
@@ -127,7 +170,9 @@
   <section class="release" aria-labelledby="release-heading">
     <h2 id="release-heading">Release identifier</h2>
     <p>Releasing it immediately makes {data.name} available for anyone else to claim.</p>
-    <button class="secondary release-button" onclick={openReleaseModal}>Release this identifier</button>
+    <button class="secondary release-button" onclick={openReleaseModal}
+      >Release this identifier</button
+    >
   </section>
 </CredentialCard>
 
@@ -155,7 +200,11 @@
         <button onclick={confirmRelease} disabled={releaseStatus === 'releasing'}>
           {releaseStatus === 'releasing' ? 'Releasing…' : `Release ${data.name}`}
         </button>
-        <button class="secondary" onclick={() => (showReleaseModal = false)} disabled={releaseStatus === 'releasing'}>
+        <button
+          class="secondary"
+          onclick={() => (showReleaseModal = false)}
+          disabled={releaseStatus === 'releasing'}
+        >
           Cancel
         </button>
       </div>

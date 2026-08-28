@@ -15,6 +15,13 @@
       "when": 1787870385882,
       "tag": "0001_first_tinkerer",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787880310139,
+      "tag": "0002_overjoyed_texas_twister",
+      "breakpoints": true
     }
   ]
 }

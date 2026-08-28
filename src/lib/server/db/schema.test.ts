@@ -87,3 +87,23 @@ describe('identifier_events', () => {
     expect(row.eventType).toBe('claimed');
   });
 });
+
+describe('identifier events for reservations', () => {
+  const name = 'reservation-event-test';
+
+  afterEach(async () => {
+    await db.delete(identifierEvents).where(eq(identifierEvents.identifierName, name));
+  });
+
+  it('accepts reserved and reservation_removed audit types', async () => {
+    await db.insert(identifierEvents).values({
+      identifierName: name,
+      eventType: 'reserved',
+      actorPubkey: 'a'.repeat(64),
+      reason: 'trademark hold'
+    });
+
+    const [row] = await db.select().from(identifierEvents).where(eq(identifierEvents.identifierName, name));
+    expect(row).toMatchObject({ eventType: 'reserved', reason: 'trademark hold' });
+  });
+});

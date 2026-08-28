@@ -23,7 +23,13 @@ export const identifiers = pgTable(
   })
 );
 
-export const identifierEventType = pgEnum('identifier_event_type', ['claimed', 'released', 'force_released']);
+export const identifierEventType = pgEnum('identifier_event_type', [
+  'claimed',
+  'released',
+  'force_released',
+  'reserved',
+  'reservation_removed'
+]);
 
 export const identifierEvents = pgTable('identifier_events', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

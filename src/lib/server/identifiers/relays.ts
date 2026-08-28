@@ -19,7 +19,7 @@ export function validateRelayList(
     try {
       parsed = new URL(relay);
     } catch {
-      return { ok: false, error: `relay ${index + 1}: not a valid URL` };
+      return { ok: false, error: `relay ${index + 1}: must be a valid URL` };
     }
 
     if (!allowedProtocols.has(parsed.protocol)) {

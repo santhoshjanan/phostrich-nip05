@@ -93,7 +93,7 @@ async function saveWithIndexedError() {
     'fetch',
     vi.fn(
       async () =>
-        new Response(JSON.stringify({ error: 'relay 1: not a valid URL' }), { status: 400 })
+        new Response(JSON.stringify({ error: 'relay 1: must be a valid URL' }), { status: 400 })
     )
   );
   button('Save relays').click();
@@ -146,7 +146,7 @@ describe('account relay editor', () => {
     const error = document.getElementById('relay-0-error');
     expect(input.getAttribute('aria-invalid')).toBe('true');
     expect(input.getAttribute('aria-describedby')).toBe('relay-0-error');
-    expect(error?.textContent).toContain('not a valid URL');
+    expect(error?.textContent).toContain('must be a valid URL');
   });
 
   it('associates a submitted relay error with its visible row after a blank row', async () => {
@@ -154,7 +154,7 @@ describe('account relay editor', () => {
       'fetch',
       vi.fn(
         async () =>
-          new Response(JSON.stringify({ error: 'relay 1: not a valid URL' }), { status: 400 })
+          new Response(JSON.stringify({ error: 'relay 1: must be a valid URL' }), { status: 400 })
       )
     );
     renderAccount();
@@ -169,7 +169,7 @@ describe('account relay editor', () => {
 
     expect(relayInput(0).getAttribute('aria-invalid')).toBeNull();
     expect(relayInput(1).getAttribute('aria-invalid')).toBe('true');
-    expect(document.getElementById('relay-1-error')?.textContent).toContain('not a valid URL');
+    expect(document.getElementById('relay-1-error')?.textContent).toContain('must be a valid URL');
   });
 
   it('clears saved state when editing a relay', async () => {

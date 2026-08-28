@@ -459,6 +459,7 @@
     font-size: 1rem;
   }
   .technical {
+    font-family: var(--font-mono);
     font-size: 0.875rem;
   }
   .date {

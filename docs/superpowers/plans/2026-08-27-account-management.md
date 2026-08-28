@@ -304,7 +304,7 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run "src/routes/api/account/relays/server.test.ts"`
-Expected: PASS (4 tests)
+Expected: all helper assertions in the current snippet pass.
 
 - [ ] **Step 5: Commit**
 
@@ -678,7 +678,7 @@ export function eligibleForReleaseDate(lastIdentifiedAtIso: string): Date {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run src/lib/client/accountForm.test.ts`
-Expected: PASS (4 tests)
+Expected: all helper assertions in the current snippet pass.
 
 - [ ] **Step 5: Commit**
 

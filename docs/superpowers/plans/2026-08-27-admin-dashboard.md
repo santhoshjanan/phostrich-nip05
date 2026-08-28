@@ -408,7 +408,7 @@ git commit -m "refactor: split isClaimableName into isValidNameFormat plus block
 - Consumes: `db`, `identifiers`, `identifierEvents` (`../db`, `../db/schema`)
 - Produces: `staleIdentifierCondition(referenceTime: Date | SQL = sql\`now()\`)` (the single PostgreSQL addition condition) and `getStaleIdentifiers(referenceTime?: Date | SQL)`, so fixed-reference tests and production's default `now()` share one implementation.
 
-Tests use fixed references, never `Date.now()`: with `last_identified_at = '2026-08-31T00:00:00Z'`, it is included just before eligibility (`2027-02-28T00:00:00.001Z`), excluded at exact eligibility (`2027-02-28T00:00:00Z`) and just after; repeat Aug 31 → Feb 29 for the 2028 leap year. Both report and force release use the default `now()` helper in production.
+Tests use fixed references, never `Date.now()`: with `last_identified_at = '2026-08-31T00:00:00Z'`, it is excluded just before and at exact eligibility, then included just after (`<` is strict); repeat Aug 31 → Feb 29 for the 2028 leap year. Both report and force release use the default `now()` helper in production.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -447,10 +447,11 @@ describe('getStaleIdentifiers', () => {
       lastIdentifiedAt: leapAugust31
     });
 
-    expect((await getStaleIdentifiers(new Date('2027-02-28T00:00:00.001Z'))).map((row) => row.name)).toContain(STALE_NAME);
-    expect((await getStaleIdentifiers(new Date('2027-02-28T00:00:00.000Z'))).map((row) => row.name)).not.toContain(STALE_NAME);
-    expect((await getStaleIdentifiers(new Date('2027-02-28T00:00:00.000Z'))).map((row) => row.name)).not.toContain(FRESH_NAME);
-    expect((await getStaleIdentifiers(new Date('2028-02-29T00:00:00.001Z'))).map((row) => row.name)).toContain(FRESH_NAME);
+    expect((await getStaleIdentifiers(new Date('2027-02-27T23:59:59.999Z'))).map((row) => row.name)).toEqual([]);
+    expect((await getStaleIdentifiers(new Date('2027-02-28T00:00:00.000Z'))).map((row) => row.name)).toEqual([]);
+    expect((await getStaleIdentifiers(new Date('2027-02-28T00:00:00.001Z'))).map((row) => row.name)).toEqual([STALE_NAME]);
+    expect((await getStaleIdentifiers(new Date('2028-02-29T00:00:00.000Z'))).map((row) => row.name)).toEqual([STALE_NAME]);
+    expect((await getStaleIdentifiers(new Date('2028-02-29T00:00:00.001Z'))).map((row) => row.name)).toEqual([STALE_NAME, FRESH_NAME]);
   });
 });
 
@@ -1467,7 +1468,48 @@ test('admin can view the report and manage reservations', async ({ page }) => {
     .getByRole('row', { name: new RegExp(reservationName) })
     .getByRole('button', { name: 'Remove' })
     .click();
+  const removalDialog = page.getByRole('dialog');
+  await expect(removalDialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(removalDialog.getByRole('button', { name: 'Remove reservation' })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(removalDialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await page.mouse.click(0, 0);
+  await expect(removalDialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(removalDialog).toBeHidden();
+
+  await page.getByRole('row', { name: new RegExp(reservationName) }).getByRole('button', { name: 'Remove' }).click();
+  await page.getByRole('button', { name: 'Remove reservation' }).click();
   await expect(page.getByText(reservationName)).not.toBeVisible();
+});
+
+test('force-release dialog has the same hard-interrupt behavior', async ({ page }) => {
+  await installFixedAdminExtension(page);
+  // Seed one stale identifier through the Task 5 fixed-reference fixture before navigating.
+  await page.goto('/admin');
+  const launcher = page.getByRole('button', { name: 'Force release stale-e2e' });
+  await launcher.click();
+  const dialog = page.getByRole('dialog');
+  const reason = dialog.getByLabel('Reason (required)');
+  const action = dialog.getByRole('button', { name: 'Force release stale-e2e' });
+  const cancel = dialog.getByRole('button', { name: 'Cancel' });
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('Tab'); await expect(reason).toBeFocused();
+  await page.keyboard.press('Tab'); await expect(action).toBeFocused();
+  await page.keyboard.press('Tab'); await expect(cancel).toBeFocused();
+  await page.keyboard.press('Shift+Tab'); await expect(action).toBeFocused();
+  await page.keyboard.press('Escape'); await expect(dialog).toBeHidden(); await expect(launcher).toBeFocused();
+  let rejectRequest: (() => void) | undefined;
+  await page.route('**/api/admin/force-release', async (route) => {
+    await new Promise<void>((resolve) => { rejectRequest = () => { void route.abort('failed'); resolve(); }; });
+  });
+  await launcher.click(); await reason.fill('e2e recovery'); await action.click();
+  await expect(dialog).toBeFocused(); await page.keyboard.press('Tab'); await expect(dialog).toBeFocused();
+  await page.keyboard.press('Escape'); await expect(dialog).toBeVisible();
+  rejectRequest?.();
+  await expect(dialog.getByText('We could not force-release this identifier. Please try again.')).toBeVisible();
+  await expect(action).toBeEnabled(); await expect(action).toBeFocused();
 });
 ```
 

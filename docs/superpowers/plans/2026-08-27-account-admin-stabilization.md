@@ -573,14 +573,75 @@ git commit -m "docs: reconcile account and admin contracts"
 
 ---
 
-### Task 5: Formatting baseline and complete verification
+### Task 5: Clamp account eligibility dates to PostgreSQL calendar semantics
+
+**Files:**
+- Modify: `src/lib/client/accountForm.ts`
+- Modify: `src/lib/client/accountForm.test.ts`
+
+**Interfaces:**
+- Consumes: an ISO `last_identified_at` timestamp.
+- Produces: `eligibleForReleaseDate(lastIdentifiedAtIso: string): Date` whose six-month addition matches PostgreSQL `timestamp + interval '6 months'`, including month-end clamping.
+
+- [ ] **Step 1: Write failing month-end tests**
+
+Add literal expectations:
+
+```ts
+it('clamps August 31 to February 28 in a common year', () => {
+  expect(eligibleForReleaseDate('2026-08-31T12:34:56.000Z').toISOString()).toBe(
+    '2027-02-28T12:34:56.000Z'
+  );
+});
+
+it('clamps August 31 to February 29 in a leap year', () => {
+  expect(eligibleForReleaseDate('2027-08-31T12:34:56.000Z').toISOString()).toBe(
+    '2028-02-29T12:34:56.000Z'
+  );
+});
+```
+
+These tests catch JavaScript's default overflow into March.
+
+- [ ] **Step 2: Run the focused tests and verify RED**
+
+Run: `pnpm vitest run src/lib/client/accountForm.test.ts -t "clamps August 31"`.
+
+Expected: both tests fail with March dates from the current `Date.UTC(year, month + 6, day, ...)` implementation.
+
+- [ ] **Step 3: Implement clamped UTC calendar addition**
+
+Construct the target year/month on day 1, calculate that target month's last UTC day, then set the day to `Math.min(sourceDay, targetLastDay)`. Preserve UTC hours, minutes, seconds, and milliseconds from the source timestamp. Do not use a fixed-day duration and do not mutate the source `Date`.
+
+The resulting function must retain the existing January 15 → July 15 behavior while producing the two literal month-end results above.
+
+- [ ] **Step 4: Run focused client and mounted account tests**
+
+Run:
+
+```bash
+pnpm vitest run src/lib/client/accountForm.test.ts src/routes/account/page.test.ts
+```
+
+Expected: all discovered helper and mounted Account tests pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/lib/client/accountForm.ts src/lib/client/accountForm.test.ts
+git commit -m "fix: clamp account eligibility dates"
+```
+
+---
+
+### Task 6: Formatting baseline and complete verification
 
 **Files:**
 - Modify: `.prettierignore`
 - Modify mechanically: files reported by `pnpm format:check`, excluding ignored generated/documentation paths
 
 **Interfaces:**
-- Consumes: all stabilization changes from Tasks 1–4.
+- Consumes: all stabilization changes from Tasks 1–5.
 - Produces: clean formatting, lint, type/Svelte, coverage, build, and available e2e gates without semantic source changes.
 
 - [ ] **Step 1: Isolate generated Impeccable artifacts from source formatting**

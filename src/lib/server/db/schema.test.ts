@@ -15,24 +15,24 @@ describe('identifiers schema', () => {
     await db.insert(identifiers).values({
       name: TEST_NAME,
       status: 'claimed',
-      ownerPubkey: 'a'.repeat(64),
+      ownerPubkey: '9'.repeat(64),
       relays: ['wss://relay.example']
     });
 
     const [row] = await db.select().from(identifiers).where(eq(identifiers.name, TEST_NAME));
     expect(row.status).toBe('claimed');
-    expect(row.ownerPubkey).toBe('a'.repeat(64));
+    expect(row.ownerPubkey).toBe('9'.repeat(64));
     expect(row.relays).toEqual(['wss://relay.example']);
   });
 
   it('rejects a second row with the same name', async () => {
     await db
       .insert(identifiers)
-      .values({ name: TEST_NAME, status: 'claimed', ownerPubkey: 'a'.repeat(64) });
+      .values({ name: TEST_NAME, status: 'claimed', ownerPubkey: '9'.repeat(64) });
     await expect(
       db
         .insert(identifiers)
-        .values({ name: TEST_NAME, status: 'claimed', ownerPubkey: 'b'.repeat(64) })
+        .values({ name: TEST_NAME, status: 'claimed', ownerPubkey: '8'.repeat(64) })
     ).rejects.toThrow();
   });
 });

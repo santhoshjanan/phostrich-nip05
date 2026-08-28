@@ -20,7 +20,7 @@ export const FIXTURES = [
 
 export async function seed(): Promise<void> {
   for (const fixture of FIXTURES) {
-    await db.insert(identifiers).values(fixture).onConflictDoNothing();
+    await db.insert(identifiers).values(fixture).onConflictDoNothing({ target: identifiers.name });
   }
 }
 

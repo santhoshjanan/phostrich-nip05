@@ -32,6 +32,9 @@
   let destructiveLauncher = $state<HTMLButtonElement>();
   let destructiveSafeAction = $state<HTMLButtonElement>();
   let destructiveDialog = $state<HTMLDivElement>();
+  let staleHeading = $state<HTMLHeadingElement>();
+  let reservationsHeading = $state<HTMLHeadingElement>();
+  let adminStatus = $state('');
 
   let newReservationName = $state('');
   let newReservationReason = $state('');
@@ -116,6 +119,8 @@
       if (result.ok) {
         stale = stale.filter((row) => row.name !== target);
         releaseTarget = null;
+        adminStatus = `Force-released ${target}.`;
+        void tick().then(() => staleHeading?.focus());
       } else {
         releaseError = result.error;
       }
@@ -125,7 +130,8 @@
     }
   }
 
-  async function addReservation() {
+  async function addReservation(event: SubmitEvent) {
+    event.preventDefault();
     if (!newReservationName.trim() || !newReservationReason.trim() || reservationPending) return;
     reservationPending = true;
     reservationError = '';
@@ -157,6 +163,8 @@
       if (result.ok) {
         reservations = reservations.filter((row) => row.name !== target);
         reservationRemovalTarget = null;
+        adminStatus = `Removed reservation for ${target}.`;
+        void tick().then(() => reservationsHeading?.focus());
       } else {
         removalError = result.error;
       }
@@ -167,10 +175,10 @@
   }
 </script>
 
-<CredentialCard title="Admin">
+<CredentialCard title="Admin" wide>
   <section aria-labelledby="stale-heading">
     <div class="section-heading">
-      <h2 id="stale-heading">Stale identifiers</h2>
+      <h2 id="stale-heading" bind:this={staleHeading} tabindex="-1">Stale identifiers</h2>
       <span class="section-count">{stale.length}</span>
     </div>
     <p class="section-note">Identifiers eligible for administrative release.</p>
@@ -211,7 +219,7 @@
 
   <section class="admin-section" aria-labelledby="reservations-heading">
     <div class="section-heading">
-      <h2 id="reservations-heading">Reservations</h2>
+      <h2 id="reservations-heading" bind:this={reservationsHeading} tabindex="-1">Reservations</h2>
       <span class="section-count">{reservations.length}</span>
     </div>
     <p class="section-note">Protected names that cannot be claimed.</p>
@@ -249,19 +257,23 @@
       </div>
     {/if}
 
-    <form class="reservation-form" onsubmit={(event) => event.preventDefault()}>
+    <form class="reservation-form" onsubmit={addReservation}>
       <h3>Add reservation</h3>
       <div class="field">
         <label for="reservation-name">Name</label>
-        <input id="reservation-name" bind:value={newReservationName} autocomplete="off" />
+        <input id="reservation-name" bind:value={newReservationName} autocomplete="off" required />
       </div>
       <div class="field">
         <label for="reservation-reason">Reason</label>
-        <input id="reservation-reason" bind:value={newReservationReason} autocomplete="off" />
+        <input
+          id="reservation-reason"
+          bind:value={newReservationReason}
+          autocomplete="off"
+          required
+        />
       </div>
       <button
-        type="button"
-        onclick={addReservation}
+        type="submit"
         disabled={!newReservationName.trim() || !newReservationReason.trim() || reservationPending}
         aria-busy={reservationPending}
       >
@@ -272,6 +284,7 @@
       {/if}
     </form>
   </section>
+  <p class="sr-only" aria-live="polite">{adminStatus}</p>
 </CredentialCard>
 
 {#if releaseTarget}
@@ -413,6 +426,7 @@
     border-collapse: collapse;
     font-family: var(--font-ui);
     font-size: 0.875rem;
+    min-width: 48rem;
     width: 100%;
   }
   th,
@@ -482,7 +496,9 @@
   .modal__content {
     background: white;
     border: 1px solid var(--color-line);
+    max-height: calc(100dvh - var(--space-2) - var(--space-2));
     max-width: 24rem;
+    overflow-y: auto;
     padding: var(--space-4);
     width: 100%;
   }
@@ -519,6 +535,9 @@
     tr,
     td {
       display: block;
+    }
+    table {
+      min-width: 0;
     }
     thead {
       clip: rect(0, 0, 0, 0);
@@ -557,6 +576,11 @@
     }
     .modal__content {
       padding: var(--space-3);
+    }
+  }
+  @media (max-height: 32rem) {
+    .modal {
+      align-items: flex-start;
     }
   }
 </style>

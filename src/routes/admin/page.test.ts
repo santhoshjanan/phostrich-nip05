@@ -112,6 +112,13 @@ afterEach(() => {
 });
 
 describe('admin reservation creation', () => {
+  it('uses the supported wide credential-card layout for desktop tables', () => {
+    renderAdmin();
+
+    expect(document.querySelector('.credential-card--wide')).not.toBeNull();
+    expect(document.querySelectorAll('.table-scroll')).toHaveLength(2);
+  });
+
   it('requires nonblank trimmed values before Add reservation is enabled', async () => {
     renderAdmin();
 
@@ -122,6 +129,45 @@ describe('admin reservation creation', () => {
 
     await type('Reason', '  Staff use  ');
     expect(button('Add reservation').disabled).toBe(false);
+  });
+
+  it('uses native required submission and guards repeated submit events while pending', async () => {
+    const request = deferredResponse();
+    const fetcher = vi.fn(() => request.promise);
+    vi.stubGlobal('fetch', fetcher);
+    renderAdmin();
+
+    expect(input('Name').required).toBe(true);
+    expect(input('Reason').required).toBe(true);
+    expect(button('Add reservation').type).toBe('submit');
+    await type('Name', 'new-name');
+    await type('Reason', 'Staff use');
+
+    const form = document.querySelector<HTMLFormElement>('.reservation-form');
+    if (!form) throw new Error('Could not find reservation form');
+    const firstSubmit = new SubmitEvent('submit', { bubbles: true, cancelable: true });
+    const secondSubmit = new SubmitEvent('submit', { bubbles: true, cancelable: true });
+    form.dispatchEvent(firstSubmit);
+    await tick();
+    form.dispatchEvent(secondSubmit);
+
+    expect(firstSubmit.defaultPrevented).toBe(true);
+    expect(secondSubmit.defaultPrevented).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(button('Adding…').disabled).toBe(true);
+
+    request.resolve(
+      jsonResponse(
+        {
+          name: 'new-name',
+          reason: 'Staff use',
+          actorPubkey: 'c'.repeat(64),
+          createdAt: '2026-08-28T12:00:00.000Z'
+        },
+        201
+      )
+    );
+    await vi.waitFor(() => expect(button('Add reservation').disabled).toBe(true));
   });
 
   it('guards a pending create against double submit and finalizes malformed responses', async () => {
@@ -252,11 +298,32 @@ describe('force-release dialog', () => {
     await type('Reason (required)', '  Policy violation  ');
     button('Force release alice').click();
 
-    await vi.waitFor(() => expect(document.body.textContent).not.toContain('alice'));
+    await vi.waitFor(() =>
+      expect(
+        document.getElementById('stale-heading')?.closest('section')?.querySelector('.identifier')
+      ).toBeNull()
+    );
     expect(fetcher).toHaveBeenCalledWith('/api/admin/force-release', {
       method: 'POST',
       body: JSON.stringify({ name: 'alice', reason: 'Policy violation' })
     });
+  });
+
+  it('focuses the surviving stale heading and announces a successful release', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse({ ok: true }, 200))
+    );
+    renderAdmin();
+    await openForceRelease();
+    await type('Reason (required)', 'Inactive');
+
+    button('Force release alice').click();
+
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    expect(document.activeElement).toBe(document.getElementById('stale-heading'));
+    const status = document.querySelector<HTMLElement>('[aria-live="polite"]');
+    expect(status?.textContent?.trim()).toBe('Force-released alice.');
   });
 
   it('guards pending release, contains focus, and recovers after request rejection', async () => {
@@ -394,8 +461,18 @@ describe('reservation-removal dialog', () => {
 
     button('Remove reservation').click();
 
-    await vi.waitFor(() => expect(document.body.textContent).not.toContain('support'));
+    await vi.waitFor(() =>
+      expect(
+        document
+          .getElementById('reservations-heading')
+          ?.closest('section')
+          ?.querySelector('.identifier')
+      ).toBeNull()
+    );
     expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(document.getElementById('reservations-heading'));
+    const status = document.querySelector<HTMLElement>('[aria-live="polite"]');
+    expect(status?.textContent?.trim()).toBe('Removed reservation for support.');
   });
 
   it('closes by idle Escape or Cancel, restores launcher focus, and ignores backdrop clicks', async () => {

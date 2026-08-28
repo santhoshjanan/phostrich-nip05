@@ -133,7 +133,7 @@
 <style>
   .identifier-input {
     font-family: var(--font-display);
-    font-size: 1.1rem;
+    font-size: 1.25rem;
     margin-bottom: var(--space-2);
   }
   .status--available {

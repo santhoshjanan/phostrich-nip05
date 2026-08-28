@@ -10,18 +10,7 @@ STORY: sign in by signature → see a name, know instantly if it's available →
 FIRST VIEWPORT: single centered card on a soft pastel ground, ruled document-style with serial labels (NAME/ISSUED/STATUS); restrained, uncluttered.
 FORM: adapted Issued Credential (user-pinned) + restraint/negative-space raise (Saville factory-records catalog) + quantified-precision/single-restrained-accent raise (darkroom exposure-record zone sheets). Seed key fd81ad37, assigned index 7.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance.
+NAVIGATION: authenticated routes (/account, /claim, /admin) carry a hairline ledger masthead — wordmark, serial-label nav, mono acting-pubkey, sign out. /login and /claimed stay chrome-free so the sign-in and issued-credential moments are undiluted.
 -->
 
-<div class="page-center">
-  {@render children()}
-</div>
-
-<style>
-  .page-center {
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-3) var(--space-2);
-  }
-</style>
+{@render children()}

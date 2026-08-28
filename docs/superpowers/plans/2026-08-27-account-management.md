@@ -6,7 +6,7 @@
 
 **Goal:** Add the persistent `/account` page — relay list editing, release, and inactivity status — completing the loop the Claim flow began.
 
-**Architecture:** A pure, injectable-flag relay validator sits behind two thin routes (`PUT /api/account/relays`, `POST /api/account/release`), mirroring every prior sub-project's layering. The account page reuses the Issued Credential shell and design tokens already built; no new visual world.
+**Architecture:** `saveOwnedRelays()` and `releaseOwnedIdentifier()` in `src/lib/server/identifiers/account.ts` sit behind two thin routes (`PUT /api/account/relays`, `POST /api/account/release`). Their conditional owner/status mutations and post-commit invalidation preserve the server-layer boundary. The account page reuses the Issued Credential shell and design tokens already built; no new visual world.
 
 **Tech Stack:** SvelteKit 2, Drizzle ORM, Playwright (extending the existing e2e suite).
 
@@ -17,9 +17,11 @@
 - Privileged logic only in `src/lib/server/**`, relative imports inside it — same as every prior sub-project.
 - Relay validation: cap 8, `wss://` required (`ws://` allowed only via an explicit `allowInsecure` flag, decided by the route from `$app/environment`'s `dev`, never hardcoded inside the validator), no credentials, no query string, deduped by normalized trailing slash, order preserved.
 - Relay-edit validation errors are specific (unlike the deliberately vague claim/availability responses) — this is a user editing their own authenticated data, not a stranger probing the system.
-- Release: hard delete of the `identifiers` row + an `identifier_events` row (`eventType: 'released'`) in one transaction, then cache invalidation — no new migration needed, the enum already has this value.
-- Release confirmation: explicit modal, no outside-click dismiss, explicit affirmative action — same hard-interrupt pattern as the claim-time expiry modal, no "type the name" friction.
-- Inactivity status: always show both "last verified" and "eligible for release after" dates, same calm tone, no color escalation.
+- Relay service: validate first, then conditionally update `owner_pubkey` + `status = 'claimed'` with `RETURNING`; a zero-row result is not found and does not invalidate.
+- Release service: conditional owner/status `DELETE ... RETURNING` plus its `released` audit insertion occur in one transaction; a zero-row result writes no audit event; cache invalidation is fail-open after a successful commit.
+- Release confirmation: explicit hard-interrupt modal with safe initial focus, Tab/Shift+Tab containment, idle-only Escape, and focus restoration after Cancel, Escape, or a failed release.
+- Inactivity status: always show `Last NIP-05 lookup` and `Eligible for release after`, with calm helper copy explaining that public lookups determine eligibility.
+- Account client requests are total: network rejections, aborts, and unusable error responses become concise user-safe failures, and save/release busy states always clear. Relay `N` errors attach to their matching fields via `aria-invalid` and `aria-describedby`.
 - `/claim`'s already-owns-one redirect changes from `/claimed` to `/account` (Task 7).
 - `.svelte` files stay excluded from the Vitest coverage threshold; verified by Playwright instead. 90% coverage gate applies to everything else.
 
@@ -30,20 +32,21 @@
 ```
 src/lib/server/identifiers/
   relays.ts, relays.test.ts          — validateRelayList()
+  account.ts, account.test.ts        — saveOwnedRelays(), releaseOwnedIdentifier()
 
 src/routes/api/account/
-  relays/+server.ts, +server.test.ts
-  release/+server.ts, +server.test.ts
+  relays/+server.ts, server.test.ts
+  release/+server.ts, server.test.ts
 
 src/routes/account/
-  +page.server.ts, +page.server.test.ts
+  +page.server.ts, page.server.test.ts
   +page.svelte
 
 src/lib/client/
   accountForm.ts, accountForm.test.ts  — saveRelays(), releaseIdentifier(), eligibleForReleaseDate()
 
 src/routes/claim/+page.server.ts (modify)       — redirect target /claimed -> /account
-src/routes/claim/+page.server.test.ts (modify)
+src/routes/claim/page.server.test.ts (modify)
 
 tests/e2e/helpers/fakeSigner.ts                  — extracted from Claim flow's e2e test
 tests/e2e/claim-flow.spec.ts (modify)            — use the extracted helper
@@ -191,16 +194,16 @@ git commit -m "feat: add relay list validator"
 
 **Files:**
 - Create: `src/routes/api/account/relays/+server.ts`
-- Test: `src/routes/api/account/relays/+server.test.ts`
+- Test: `src/routes/api/account/relays/server.test.ts`
 
 **Interfaces:**
-- Consumes: `validateRelayList` from Task 1, `invalidateIdentifier` (Foundation/Claim-flow, `$lib/server/db/identifiers`), `dev` from `$app/environment`
+- Consumes: `saveOwnedRelays` from `src/lib/server/identifiers/account`, `dev` from `$app/environment`
 - Produces: `PUT: RequestHandler` — `{relays}` on 200, 400 on validation failure, 401 unauthenticated, 404 if the caller owns nothing
 
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// src/routes/api/account/relays/+server.test.ts
+// src/routes/api/account/relays/server.test.ts
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -263,21 +266,17 @@ describe('PUT /api/account/relays', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run "src/routes/api/account/relays/+server.test.ts"`
+Run: `pnpm vitest run "src/routes/api/account/relays/server.test.ts"`
 Expected: FAIL — `./+server` does not exist.
 
 - [ ] **Step 3: Write the implementation**
 
 ```ts
 // src/routes/api/account/relays/+server.ts
+import { dev } from '$app/environment';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { dev } from '$app/environment';
-import { and, eq } from 'drizzle-orm';
-import { db } from '$lib/server/db';
-import { identifiers } from '$lib/server/db/schema';
-import { invalidateIdentifier } from '$lib/server/db/identifiers';
-import { validateRelayList } from '$lib/server/identifiers/relays';
+import { saveOwnedRelays } from '$lib/server/identifiers/account';
 
 export const PUT: RequestHandler = async ({ request, locals }) => {
   if (!locals.user) {
@@ -290,41 +289,27 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
     return json({ error: 'invalid_relays' }, { status: 400 });
   }
 
-  const validation = validateRelayList(relays, { allowInsecure: dev });
-  if (!validation.ok) {
-    return json({ error: validation.error }, { status: 400 });
+  const result = await saveOwnedRelays(locals.user.pubkey, relays, { allowInsecure: dev });
+  if (!result.ok && result.reason === 'invalid_relays') {
+    return json({ error: result.error }, { status: 400 });
   }
-
-  const [existing] = await db
-    .select({ name: identifiers.name })
-    .from(identifiers)
-    .where(and(eq(identifiers.ownerPubkey, locals.user.pubkey), eq(identifiers.status, 'claimed')))
-    .limit(1);
-
-  if (!existing) {
+  if (!result.ok) {
     return json({ error: 'not_found' }, { status: 404 });
   }
 
-  await db
-    .update(identifiers)
-    .set({ relays: validation.relays, updatedAt: new Date() })
-    .where(eq(identifiers.name, existing.name));
-
-  await invalidateIdentifier(existing.name);
-
-  return json({ relays: validation.relays });
+  return json({ relays: result.relays });
 };
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm vitest run "src/routes/api/account/relays/+server.test.ts"`
+Run: `pnpm vitest run "src/routes/api/account/relays/server.test.ts"`
 Expected: PASS (4 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add "src/routes/api/account/relays/+server.ts" "src/routes/api/account/relays/+server.test.ts"
+git add "src/routes/api/account/relays/+server.ts" "src/routes/api/account/relays/server.test.ts"
 git commit -m "feat: add PUT /api/account/relays"
 ```
 
@@ -334,16 +319,16 @@ git commit -m "feat: add PUT /api/account/relays"
 
 **Files:**
 - Create: `src/routes/api/account/release/+server.ts`
-- Test: `src/routes/api/account/release/+server.test.ts`
+- Test: `src/routes/api/account/release/server.test.ts`
 
 **Interfaces:**
-- Consumes: `identifierEvents`, `identifiers` (`$lib/server/db/schema`), `invalidateIdentifier` (`$lib/server/db/identifiers`)
+- Consumes: `releaseOwnedIdentifier` from `src/lib/server/identifiers/account`
 - Produces: `POST: RequestHandler` — `{ok: true}` on 200, 401 unauthenticated, 404 if the caller owns nothing
 
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// src/routes/api/account/release/+server.test.ts
+// src/routes/api/account/release/server.test.ts
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -396,7 +381,7 @@ describe('POST /api/account/release', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run "src/routes/api/account/release/+server.test.ts"`
+Run: `pnpm vitest run "src/routes/api/account/release/server.test.ts"`
 Expected: FAIL — `./+server` does not exist.
 
 - [ ] **Step 3: Write the implementation**
@@ -405,37 +390,14 @@ Expected: FAIL — `./+server` does not exist.
 // src/routes/api/account/release/+server.ts
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { and, eq } from 'drizzle-orm';
-import { db } from '$lib/server/db';
-import { identifierEvents, identifiers } from '$lib/server/db/schema';
-import { invalidateIdentifier } from '$lib/server/db/identifiers';
+import { releaseOwnedIdentifier } from '$lib/server/identifiers/account';
 
 export const POST: RequestHandler = async ({ locals }) => {
   if (!locals.user) {
     return json({ error: 'unauthenticated' }, { status: 401 });
   }
-  const ownerPubkey = locals.user.pubkey;
-
-  const [existing] = await db
-    .select({ name: identifiers.name })
-    .from(identifiers)
-    .where(and(eq(identifiers.ownerPubkey, ownerPubkey), eq(identifiers.status, 'claimed')))
-    .limit(1);
-
-  if (!existing) {
-    return json({ error: 'not_found' }, { status: 404 });
-  }
-
-  await db.transaction(async (tx) => {
-    await tx.delete(identifiers).where(eq(identifiers.name, existing.name));
-    await tx.insert(identifierEvents).values({
-      identifierName: existing.name,
-      eventType: 'released',
-      actorPubkey: ownerPubkey
-    });
-  });
-
-  await invalidateIdentifier(existing.name);
+  const result = await releaseOwnedIdentifier(locals.user.pubkey);
+  if (!result.ok) return json({ error: 'not_found' }, { status: 404 });
 
   return json({ ok: true });
 };
@@ -443,13 +405,13 @@ export const POST: RequestHandler = async ({ locals }) => {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm vitest run "src/routes/api/account/release/+server.test.ts"`
+Run: `pnpm vitest run "src/routes/api/account/release/server.test.ts"`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add "src/routes/api/account/release/+server.ts" "src/routes/api/account/release/+server.test.ts"
+git add "src/routes/api/account/release/+server.ts" "src/routes/api/account/release/server.test.ts"
 git commit -m "feat: add POST /api/account/release"
 ```
 
@@ -459,7 +421,7 @@ git commit -m "feat: add POST /api/account/release"
 
 **Files:**
 - Create: `src/routes/account/+page.server.ts`
-- Test: `src/routes/account/+page.server.test.ts`
+- Test: `src/routes/account/page.server.test.ts`
 
 **Interfaces:**
 - Consumes: `db`, `identifiers` (`$lib/server/db`, `$lib/server/db/schema`)
@@ -468,7 +430,7 @@ git commit -m "feat: add POST /api/account/release"
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// src/routes/account/+page.server.test.ts
+// src/routes/account/page.server.test.ts
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -513,7 +475,7 @@ describe('account page load', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run src/routes/account/+page.server.test.ts`
+Run: `pnpm vitest run src/routes/account/page.server.test.ts`
 Expected: FAIL — `./+page.server` does not exist.
 
 - [ ] **Step 3: Write the implementation**
@@ -555,13 +517,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm vitest run src/routes/account/+page.server.test.ts`
+Run: `pnpm vitest run src/routes/account/page.server.test.ts`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/routes/account/+page.server.ts src/routes/account/+page.server.test.ts
+git add src/routes/account/+page.server.ts src/routes/account/page.server.test.ts
 git commit -m "feat: add /account load guard"
 ```
 
@@ -576,6 +538,8 @@ git commit -m "feat: add /account load guard"
 **Interfaces:**
 - Consumes: nothing from earlier tasks in this plan (calls the routes from Tasks 2–3 over `fetch`)
 - Produces: `saveRelays(relays: string[]): Promise<{ok:true; relays:string[]}|{ok:false; error:string}>`, `releaseIdentifier(): Promise<{ok:true}|{ok:false; error:string}>`, `eligibleForReleaseDate(lastIdentifiedAtIso: string): Date` from `src/lib/client/accountForm.ts`
+
+**Stabilization correction:** both request helpers are total: wrap fetch and error-body decoding so rejected, aborted, and unusable responses return concise user-safe failure results. Callers use `finally`-style cleanup so busy state cannot stick.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -744,7 +708,8 @@ git commit -m "feat: add client-side account form logic"
 </script>
 
 <CredentialCard title={data.name}>
-  <p class="status">Last verified: {new Date(data.lastIdentifiedAt).toLocaleDateString()}</p>
+  <p class="status">Last NIP-05 lookup: {new Date(data.lastIdentifiedAt).toLocaleDateString()}</p>
+  <p class="helper">Public NIP-05 lookups determine release eligibility.</p>
   <p class="status">Eligible for release after: {eligibleDate.toLocaleDateString()}</p>
 
   <h2>Relays</h2>
@@ -779,12 +744,12 @@ git commit -m "feat: add client-side account form logic"
 
 <style>
   .status {
-    font-family: var(--font-mono);
+    font-family: var(--font-ui);
     font-size: 0.875rem;
     color: var(--color-ink);
   }
   .error {
-    color: var(--color-oxblood);
+    color: var(--color-accent-rose-text);
   }
   .modal {
     position: fixed;
@@ -820,7 +785,7 @@ git commit -m "feat: add /account screen"
 
 **Files:**
 - Modify: `src/routes/claim/+page.server.ts`
-- Modify: `src/routes/claim/+page.server.test.ts`
+- Modify: `src/routes/claim/page.server.test.ts`
 
 **Interfaces:**
 - Consumes: nothing new
@@ -829,7 +794,7 @@ git commit -m "feat: add /account screen"
 - [ ] **Step 1: Update the test's expectation**
 
 ```ts
-// src/routes/claim/+page.server.test.ts (full file)
+// src/routes/claim/page.server.test.ts (full file)
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -868,7 +833,7 @@ describe('claim page load', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `pnpm vitest run src/routes/claim/+page.server.test.ts`
+Run: `pnpm vitest run src/routes/claim/page.server.test.ts`
 Expected: FAIL — the redirect still points at `/claimed`.
 
 - [ ] **Step 3: Update the implementation**
@@ -900,13 +865,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `pnpm vitest run src/routes/claim/+page.server.test.ts`
+Run: `pnpm vitest run src/routes/claim/page.server.test.ts`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/routes/claim/+page.server.ts src/routes/claim/+page.server.test.ts
+git add src/routes/claim/+page.server.ts src/routes/claim/page.server.test.ts
 git commit -m "fix: redirect existing owners from /claim to /account"
 ```
 
@@ -1048,15 +1013,15 @@ Add a new section after "Claim flow":
 Run: `pnpm test:coverage`
 Expected: all tests pass (Foundation's, Auth's, Claim flow's, and this plan's); coverage meets the 90% threshold.
 
-- [ ] **Step 3: Run static checks**
+- [ ] **Step 3: Run format, static checks, and a production build**
 
-Run: `pnpm check && pnpm lint`
-Expected: both succeed with no errors.
+Run: `pnpm format:check && pnpm lint && pnpm check && pnpm build`
+Expected: all succeed with no errors.
 
 - [ ] **Step 4: Run the e2e suite**
 
 Run: `pnpm test:e2e`
-Expected: PASS (2 tests), per Task 8.
+Expected: zero failures from the discovered suite.
 
 - [ ] **Step 5: Manual smoke test**
 

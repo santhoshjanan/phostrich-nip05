@@ -12,6 +12,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-27-admin-dashboard-design.md` (and `docs/SPEC.md`, `PRODUCT.md` for full context)
 
+> **Execution status (2026-08-27):** Tasks 1–4 were completed at commit `3f34d20`. Their checklists below are preserved as implementation history and must not be repeated. Remaining execution begins at Task 5.
+
 ## Global Constraints
 
 - Privileged logic only in `src/lib/server/**`, relative imports inside it — same as every prior sub-project.
@@ -19,7 +21,8 @@
 - `/admin`: unauthenticated → redirect `/login`; authenticated non-admin → `403` (not a disguising redirect).
 - Staleness report is a **live query** — no background job dependency.
 - Reservation creation validates format only (`isValidNameFormat`, not the reserved-pattern blocklist).
-- Force-release re-verifies staleness server-side inside the same delete, never trusting the report snapshot the admin is looking at.
+- Report and force-release import the same `staleIdentifierCondition()` from `src/lib/server/identifiers/adminQueries.ts`; it returns Drizzle SQL for `last_identified_at < now() - interval '6 months'`.
+- Force-release re-verifies that shared condition server-side inside the same delete, never trusting the report snapshot the admin is looking at.
 - Force-release requires a reason; reservation creation requires a reason. Reservation removal does not require one.
 - Admin-facing conflict/error messages may be specific (unlike the public-facing endpoints) — the admin already sees the full picture in the report.
 - `identifierEventType` gains `'reserved'` and `'reservation_removed'` — one new migration, nothing else about the schema changes.
@@ -45,12 +48,12 @@ src/lib/server/
     adminQueries.ts, adminQueries.test.ts  — getStaleIdentifiers(), getReservations()
 
 src/routes/api/admin/
-  reservations/+server.ts, +server.test.ts             — POST
-  reservations/[name]/+server.ts, +server.test.ts       — DELETE
-  force-release/+server.ts, +server.test.ts             — POST
+  reservations/+server.ts, server.test.ts             — POST
+  reservations/[name]/+server.ts, server.test.ts       — DELETE
+  force-release/+server.ts, server.test.ts             — POST
 
 src/routes/admin/
-  +page.server.ts, +page.server.test.ts
+  +page.server.ts, page.server.test.ts
   +page.svelte
 
 .env.example (modify)
@@ -403,7 +406,9 @@ git commit -m "refactor: split isClaimableName into isValidNameFormat plus block
 
 **Interfaces:**
 - Consumes: `db`, `identifiers`, `identifierEvents` (`../db`, `../db/schema`)
-- Produces: `getStaleIdentifiers(): Promise<StaleIdentifier[]>`, `getReservations(): Promise<Reservation[]>`, `interface StaleIdentifier { name: string; ownerPubkey: string | null; lastIdentifiedAt: Date }`, `interface Reservation { name: string; createdAt: Date; reason: string | null; actorPubkey: string | null }` from `src/lib/server/identifiers/adminQueries.ts`
+- Produces: `staleIdentifierCondition()` (the single PostgreSQL `last_identified_at < now() - interval '6 months'` condition), `getStaleIdentifiers(): Promise<StaleIdentifier[]>`, and `getReservations(): Promise<Reservation[]>` from `src/lib/server/identifiers/adminQueries.ts`
+
+Tests must include just-inside and just-outside six-calendar-month boundaries, including a month-end or leap-year case, and both the report and force-release consume this one condition.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -482,11 +487,13 @@ Expected: FAIL — `./adminQueries` does not exist.
 
 ```ts
 // src/lib/server/identifiers/adminQueries.ts
-import { and, asc, desc, eq, lt } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { identifierEvents, identifiers } from '../db/schema';
 
-const STALE_AFTER_MS = 6 * 30 * 24 * 60 * 60 * 1000;
+export function staleIdentifierCondition() {
+  return sql`${identifiers.lastIdentifiedAt} < now() - interval '6 months'`;
+}
 
 export interface StaleIdentifier {
   name: string;
@@ -502,7 +509,6 @@ export interface Reservation {
 }
 
 export async function getStaleIdentifiers(): Promise<StaleIdentifier[]> {
-  const cutoff = new Date(Date.now() - STALE_AFTER_MS);
   return db
     .select({
       name: identifiers.name,
@@ -510,7 +516,7 @@ export async function getStaleIdentifiers(): Promise<StaleIdentifier[]> {
       lastIdentifiedAt: identifiers.lastIdentifiedAt
     })
     .from(identifiers)
-    .where(and(eq(identifiers.status, 'claimed'), lt(identifiers.lastIdentifiedAt, cutoff)))
+    .where(and(eq(identifiers.status, 'claimed'), staleIdentifierCondition()))
     .orderBy(asc(identifiers.lastIdentifiedAt));
 }
 
@@ -555,7 +561,7 @@ git commit -m "feat: add admin report queries"
 
 **Files:**
 - Create: `src/routes/api/admin/reservations/+server.ts`
-- Test: `src/routes/api/admin/reservations/+server.test.ts`
+- Test: `src/routes/api/admin/reservations/server.test.ts`
 
 **Interfaces:**
 - Consumes: `isAdmin` from Task 2, `isValidNameFormat` from Task 4, `identifiers`/`identifierEvents` (`$lib/server/db/schema`), `db` (`$lib/server/db`)
@@ -564,7 +570,7 @@ git commit -m "feat: add admin report queries"
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// src/routes/api/admin/reservations/+server.test.ts
+// src/routes/api/admin/reservations/server.test.ts
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -633,7 +639,7 @@ describe('POST /api/admin/reservations', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run "src/routes/api/admin/reservations/+server.test.ts"`
+Run: `pnpm vitest run "src/routes/api/admin/reservations/server.test.ts"`
 Expected: FAIL — `./+server` does not exist.
 
 - [ ] **Step 3: Write the implementation**
@@ -700,13 +706,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm vitest run "src/routes/api/admin/reservations/+server.test.ts"`
+Run: `pnpm vitest run "src/routes/api/admin/reservations/server.test.ts"`
 Expected: PASS (5 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add "src/routes/api/admin/reservations/+server.ts" "src/routes/api/admin/reservations/+server.test.ts"
+git add "src/routes/api/admin/reservations/+server.ts" "src/routes/api/admin/reservations/server.test.ts"
 git commit -m "feat: add POST /api/admin/reservations"
 ```
 
@@ -716,7 +722,7 @@ git commit -m "feat: add POST /api/admin/reservations"
 
 **Files:**
 - Create: `src/routes/api/admin/reservations/[name]/+server.ts`
-- Test: `src/routes/api/admin/reservations/[name]/+server.test.ts`
+- Test: `src/routes/api/admin/reservations/[name]/server.test.ts`
 
 **Interfaces:**
 - Consumes: `isAdmin` from Task 2, `identifiers`/`identifierEvents` (`$lib/server/db/schema`), `db`
@@ -725,7 +731,7 @@ git commit -m "feat: add POST /api/admin/reservations"
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// src/routes/api/admin/reservations/[name]/+server.test.ts
+// src/routes/api/admin/reservations/[name]/server.test.ts
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -781,7 +787,7 @@ describe('DELETE /api/admin/reservations/[name]', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run "src/routes/api/admin/reservations/[name]/+server.test.ts"`
+Run: `pnpm vitest run "src/routes/api/admin/reservations/[name]/server.test.ts"`
 Expected: FAIL — `./+server` does not exist.
 
 - [ ] **Step 3: Write the implementation**
@@ -806,20 +812,23 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
 
   const name = params.name!;
 
-  const result = await db
-    .delete(identifiers)
-    .where(and(eq(identifiers.name, name), eq(identifiers.status, 'reserved')))
-    .returning({ name: identifiers.name });
+  const deleted = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .delete(identifiers)
+      .where(and(eq(identifiers.name, name), eq(identifiers.status, 'reserved')))
+      .returning({ name: identifiers.name });
+    if (!row) return null;
+    await tx.insert(identifierEvents).values({
+      identifierName: row.name,
+      eventType: 'reservation_removed',
+      actorPubkey: adminPubkey
+    });
+    return row;
+  });
 
-  if (result.length === 0) {
+  if (!deleted) {
     return json({ error: 'not_found' }, { status: 404 });
   }
-
-  await db.insert(identifierEvents).values({
-    identifierName: name,
-    eventType: 'reservation_removed',
-    actorPubkey: adminPubkey
-  });
 
   return json({ ok: true });
 };
@@ -827,13 +836,13 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm vitest run "src/routes/api/admin/reservations/[name]/+server.test.ts"`
+Run: `pnpm vitest run "src/routes/api/admin/reservations/[name]/server.test.ts"`
 Expected: PASS (4 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add "src/routes/api/admin/reservations/[name]/+server.ts" "src/routes/api/admin/reservations/[name]/+server.test.ts"
+git add "src/routes/api/admin/reservations/[name]/+server.ts" "src/routes/api/admin/reservations/[name]/server.test.ts"
 git commit -m "feat: add DELETE /api/admin/reservations/[name]"
 ```
 
@@ -843,7 +852,7 @@ git commit -m "feat: add DELETE /api/admin/reservations/[name]"
 
 **Files:**
 - Create: `src/routes/api/admin/force-release/+server.ts`
-- Test: `src/routes/api/admin/force-release/+server.test.ts`
+- Test: `src/routes/api/admin/force-release/server.test.ts`
 
 **Interfaces:**
 - Consumes: `isAdmin` from Task 2, `invalidateIdentifier` (`$lib/server/db/identifiers`), `identifiers`/`identifierEvents` (`$lib/server/db/schema`)
@@ -852,7 +861,7 @@ git commit -m "feat: add DELETE /api/admin/reservations/[name]"
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// src/routes/api/admin/force-release/+server.test.ts
+// src/routes/api/admin/force-release/server.test.ts
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -930,7 +939,7 @@ describe('POST /api/admin/force-release', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run "src/routes/api/admin/force-release/+server.test.ts"`
+Run: `pnpm vitest run "src/routes/api/admin/force-release/server.test.ts"`
 Expected: FAIL — `./+server` does not exist.
 
 - [ ] **Step 3: Write the implementation**
@@ -938,14 +947,13 @@ Expected: FAIL — `./+server` does not exist.
 ```ts
 // src/routes/api/admin/force-release/+server.ts
 import { json } from '@sveltejs/kit';
-import { and, eq, lt } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { identifierEvents, identifiers } from '$lib/server/db/schema';
 import { invalidateIdentifier } from '$lib/server/db/identifiers';
 import { isAdmin } from '$lib/server/auth/admin';
-
-const STALE_AFTER_MS = 6 * 30 * 24 * 60 * 60 * 1000;
+import { staleIdentifierCondition } from '$lib/server/identifiers/adminQueries';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
   if (!locals.user) {
@@ -964,16 +972,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     return json({ error: 'invalid_request' }, { status: 400 });
   }
 
-  const cutoff = new Date(Date.now() - STALE_AFTER_MS);
+  const deleted = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .delete(identifiers)
+      .where(and(eq(identifiers.name, name), eq(identifiers.status, 'claimed'), staleIdentifierCondition()))
+      .returning({ name: identifiers.name });
+    if (!row) return null;
+    await tx.insert(identifierEvents).values({
+      identifierName: row.name,
+      eventType: 'force_released',
+      actorPubkey: adminPubkey,
+      reason
+    });
+    return row;
+  });
 
-  const deleted = await db
-    .delete(identifiers)
-    .where(
-      and(eq(identifiers.name, name), eq(identifiers.status, 'claimed'), lt(identifiers.lastIdentifiedAt, cutoff))
-    )
-    .returning({ name: identifiers.name });
-
-  if (deleted.length === 0) {
+  if (!deleted) {
     const [current] = await db
       .select({ lastIdentifiedAt: identifiers.lastIdentifiedAt })
       .from(identifiers)
@@ -989,14 +1003,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     );
   }
 
-  await db.insert(identifierEvents).values({
-    identifierName: name,
-    eventType: 'force_released',
-    actorPubkey: adminPubkey,
-    reason
-  });
-
-  await invalidateIdentifier(name);
+  await invalidateIdentifier(deleted.name);
 
   return json({ ok: true });
 };
@@ -1004,13 +1011,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm vitest run "src/routes/api/admin/force-release/+server.test.ts"`
+Run: `pnpm vitest run "src/routes/api/admin/force-release/server.test.ts"`
 Expected: PASS (5 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add "src/routes/api/admin/force-release/+server.ts" "src/routes/api/admin/force-release/+server.test.ts"
+git add "src/routes/api/admin/force-release/+server.ts" "src/routes/api/admin/force-release/server.test.ts"
 git commit -m "feat: add POST /api/admin/force-release"
 ```
 
@@ -1020,7 +1027,7 @@ git commit -m "feat: add POST /api/admin/force-release"
 
 **Files:**
 - Create: `src/routes/admin/+page.server.ts`
-- Test: `src/routes/admin/+page.server.test.ts`
+- Test: `src/routes/admin/page.server.test.ts`
 
 **Interfaces:**
 - Consumes: `isAdmin` from Task 2, `getStaleIdentifiers`/`getReservations` from Task 5
@@ -1029,7 +1036,7 @@ git commit -m "feat: add POST /api/admin/force-release"
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// src/routes/admin/+page.server.test.ts
+// src/routes/admin/page.server.test.ts
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -1075,7 +1082,7 @@ describe('admin page load', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run src/routes/admin/+page.server.test.ts`
+Run: `pnpm vitest run src/routes/admin/page.server.test.ts`
 Expected: FAIL — `./+page.server` does not exist.
 
 - [ ] **Step 3: Write the implementation**
@@ -1115,13 +1122,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm vitest run src/routes/admin/+page.server.test.ts`
+Run: `pnpm vitest run src/routes/admin/page.server.test.ts`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/routes/admin/+page.server.ts src/routes/admin/+page.server.test.ts
+git add src/routes/admin/+page.server.ts src/routes/admin/page.server.test.ts
 git commit -m "feat: add /admin load guard"
 ```
 
@@ -1135,6 +1142,8 @@ git commit -m "feat: add /admin load guard"
 **Interfaces:**
 - Consumes: `CredentialCard` (Claim flow, `$lib/client/CredentialCard.svelte`); the two write endpoints from Tasks 6–8 over `fetch`
 - Produces: the `/admin` route. No dedicated Vitest test (thin markup+wiring, verified by Task 11's Playwright test), consistent with prior sub-projects' convention.
+
+**Accessibility correction:** force-release and reservation-remove are destructive hard-interrupt dialogs. On open each records its launcher and focuses a safe control; Tab and Shift+Tab stay contained; Escape closes only while idle; Cancel, Escape, and failed requests restore focus. Network failures become concise user-safe errors and never leave either dialog busy or unusable.
 
 - [ ] **Step 1: Write `+page.svelte`**
 
@@ -1218,7 +1227,7 @@ git commit -m "feat: add /admin load guard"
   <h2>Stale identifiers</h2>
   <table>
     <thead>
-      <tr><th>Name</th><th>Owner</th><th>Last verified</th><th></th></tr>
+      <tr><th>Name</th><th>Owner</th><th>Last NIP-05 lookup</th><th></th></tr>
     </thead>
     <tbody>
       {#each stale as row}
@@ -1279,17 +1288,17 @@ git commit -m "feat: add /admin load guard"
   table {
     width: 100%;
     border-collapse: collapse;
-    font-family: var(--font-mono);
+    font-family: var(--font-ui);
     font-size: 0.875rem;
   }
   th,
   td {
-    border-bottom: 1px solid var(--color-void);
+    border-bottom: 1px solid var(--color-line);
     padding: var(--space-1);
     text-align: left;
   }
   .error {
-    color: var(--color-oxblood);
+    color: var(--color-accent-rose-text);
   }
   .modal {
     position: fixed;
@@ -1393,7 +1402,7 @@ test('admin can view the report and manage reservations', async ({ page }) => {
 - [ ] **Step 3: Run the full e2e suite**
 
 Run: `pnpm test:e2e`
-Expected: PASS (4 tests — the prior 3 plus this one). Requires `.env`'s `ADMIN_PUBKEYS` to include `0000000000000000000000000000000000000000000000000000000000000000` (Task 1) and `PUBLIC_ORIGIN` set for the preview port, as in prior plans.
+Expected: zero failures from the discovered Playwright suite. Requires `.env`'s `ADMIN_PUBKEYS` to include `0000000000000000000000000000000000000000000000000000000000000000` (Task 1) and `PUBLIC_ORIGIN` set for the preview port, as in prior plans.
 
 - [ ] **Step 4: Commit**
 
@@ -1429,15 +1438,15 @@ Add a new section after "Account management":
 Run: `pnpm test:coverage`
 Expected: all tests pass (every prior sub-project's plus this plan's); coverage meets the 90% threshold.
 
-- [ ] **Step 3: Run static checks**
+- [ ] **Step 3: Run format, static checks, and a production build**
 
-Run: `pnpm check && pnpm lint`
-Expected: both succeed with no errors.
+Run: `pnpm format:check && pnpm lint && pnpm check && pnpm build`
+Expected: all succeed with no errors.
 
 - [ ] **Step 4: Run the e2e suite**
 
 Run: `pnpm test:e2e`
-Expected: PASS (4 tests), per Task 11.
+Expected: zero failures from the discovered suite.
 
 - [ ] **Step 5: Manual smoke test**
 

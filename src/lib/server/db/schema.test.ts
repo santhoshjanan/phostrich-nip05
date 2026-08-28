@@ -1,8 +1,11 @@
 // src/lib/server/db/schema.test.ts
+import { randomBytes } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq, inArray } from 'drizzle-orm';
 import { db } from './index';
 import { identifiers, identifierEvents } from './schema';
+
+const randomPubkey = () => randomBytes(32).toString('hex');
 
 const TEST_NAME = 'foundation-schema-smoke-test';
 
@@ -52,7 +55,7 @@ describe('one identifier per owner', () => {
   });
 
   it('rejects a second claimed row for the same owner_pubkey', async () => {
-    const owner = 'f'.repeat(64);
+    const owner = randomPubkey();
     await db.insert(identifiers).values({ name: 'owner-cap-test-1', status: 'claimed', ownerPubkey: owner });
     await expect(
       db.insert(identifiers).values({ name: 'owner-cap-test-2', status: 'claimed', ownerPubkey: owner })
@@ -60,7 +63,7 @@ describe('one identifier per owner', () => {
   });
 
   it('allows the same owner_pubkey on a non-claimed row', async () => {
-    const owner = 'e'.repeat(64);
+    const owner = randomPubkey();
     await db.insert(identifiers).values({ name: 'owner-cap-test-3', status: 'claimed', ownerPubkey: owner });
     await db.insert(identifiers).values({ name: 'owner-cap-test-4', status: 'reserved', ownerPubkey: owner });
   });

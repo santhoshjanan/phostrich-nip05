@@ -42,6 +42,7 @@
   }
 
   async function confirmClaim() {
+    if (isSubmitting) return;
     isSubmitting = true;
     try {
       const result = await submitClaim(name.toLowerCase());

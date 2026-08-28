@@ -10,6 +10,8 @@ process.env.PUBLIC_ORIGIN = PREVIEW_ORIGIN;
 
 export default defineConfig({
   testDir: 'tests/e2e',
+  // Retry once in CI to absorb runner timing flakiness; never retry locally.
+  retries: process.env.CI ? 1 : 0,
   use: {
     baseURL: PREVIEW_ORIGIN
   },

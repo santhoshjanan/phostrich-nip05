@@ -1,10 +1,31 @@
 <!-- src/routes/login/+page.svelte -->
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
   import { signInWithBunker, signInWithExtension } from '$lib/client/auth';
 
   let hasExtension = $state(typeof window !== 'undefined' && Boolean(window.nostr));
+
+  // NIP-07 extensions inject window.nostr from a content script, which can land
+  // after this page hydrates. Re-check on mount and poll briefly for a late
+  // injection so the extension option isn't hidden by a load-order race.
+  onMount(() => {
+    if (window.nostr) {
+      hasExtension = true;
+      return;
+    }
+    let tries = 0;
+    const timer = setInterval(() => {
+      if (window.nostr) {
+        hasExtension = true;
+        clearInterval(timer);
+      } else if (++tries >= 30) {
+        clearInterval(timer);
+      }
+    }, 100);
+    return () => clearInterval(timer);
+  });
   let bunkerUri = $state('');
   let status = $state<'idle' | 'connecting' | 'error'>('idle');
   let errorMessage = $state('');

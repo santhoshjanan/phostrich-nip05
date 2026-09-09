@@ -8,3 +8,7 @@ docs/
 .superpowers/
 PRODUCT.md
 .impeccable/
+.agent/
+.agents/
+.claude/
+.codex/

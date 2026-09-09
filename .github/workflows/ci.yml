@@ -20,6 +20,13 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # Run the job itself in a container so it shares the per-job network with
+    # the service containers below — that is what makes `postgres` / `valkey`
+    # resolve as hostnames. Without this, on a host-mode Gitea runner the
+    # services are unreachable (getaddrinfo EAI_AGAIN postgres) and there are
+    # no published ports to fall back to. `node:24` (Debian) ships git, which
+    # actions/checkout needs.
+    container: node:24
     services:
       postgres:
         image: postgres:16-alpine
@@ -35,9 +42,9 @@ jobs:
       valkey:
         image: valkey/valkey:8-alpine
     env:
-      # Jobs run in a container on a per-job network; reach services by name,
-      # not localhost, and don't publish host ports (they collide on a
-      # self-hosted runner that shares the box with other services).
+      # This job runs in a container (see `container:` above) on the per-job
+      # network, so reach services by name, not localhost. Host ports are not
+      # published — they collide on a self-hosted runner that shares the box.
       DATABASE_URL: postgres://phostrich:phostrich@postgres:5432/phostrich
       VALKEY_URL: redis://valkey:6379
       PUBLIC_ORIGIN: http://localhost:4173

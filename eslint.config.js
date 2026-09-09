@@ -19,6 +19,19 @@ export default [
     }
   },
   {
-    ignores: ['build/', '.svelte-kit/', 'dist/', 'drizzle/']
+    // Build output and vendored agent/skill tooling checked into the repo
+    // (impeccable, superpowers, etc.) — not project source, don't lint it.
+    ignores: [
+      'build/',
+      '.svelte-kit/',
+      'dist/',
+      'drizzle/',
+      '.agent/',
+      '.agents/',
+      '.claude/',
+      '.codex/',
+      '.impeccable/',
+      '.superpowers/'
+    ]
   }
 ];

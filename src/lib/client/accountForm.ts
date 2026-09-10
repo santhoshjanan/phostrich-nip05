@@ -29,6 +29,7 @@ export async function saveRelays(relays: string[]): Promise<RelaySaveResult> {
   try {
     response = await fetch('/api/account/relays', {
       method: 'PUT',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ relays })
     });
   } catch {

@@ -237,6 +237,7 @@ describe('admin reservation creation', () => {
     expect(document.body.textContent).toContain('c'.repeat(64));
     expect(fetcher).toHaveBeenCalledWith('/api/admin/reservations', {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'draft-name', reason: 'Staff use' })
     });
     expect(input('Name').value).toBe('');
@@ -314,6 +315,7 @@ describe('force-release dialog', () => {
     );
     expect(fetcher).toHaveBeenCalledWith('/api/admin/force-release', {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'alice', reason: 'Policy violation' })
     });
   });

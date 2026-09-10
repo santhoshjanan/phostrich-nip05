@@ -36,6 +36,7 @@ export async function createReservation(
   try {
     const response = await fetcher('/api/admin/reservations', {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name, reason })
     });
     const body = await readBody(response);
@@ -87,6 +88,7 @@ export async function forceReleaseIdentifier(
   try {
     const response = await fetcher('/api/admin/force-release', {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name, reason })
     });
     const body = await readBody(response);

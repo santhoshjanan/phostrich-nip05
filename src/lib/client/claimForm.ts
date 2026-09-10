@@ -22,6 +22,7 @@ export async function submitClaim(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const response = await fetch('/api/identifiers/claim', {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name })
   });
   if (response.status === 201) {

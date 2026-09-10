@@ -45,6 +45,18 @@
         "value": "1.15rem",
         "createdAt": "2026-08-28T01:15:05.123Z",
         "reason": "DESIGN.md documents 1.15rem–1.5rem for UI titles."
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#000",
+        "createdAt": "2026-09-10T22:34:44.946Z",
+        "reason": "mask-image alpha idiom in GuillocheGround: #000/transparent are mask channel values, not a visible palette color"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "1.75rem",
+        "createdAt": "2026-09-10T22:36:12.729Z",
+        "reason": "login brand wordmark: intentional one-step-up above the 1.5rem card-header max so the Phostrich.com mark outranks the Sign in card title on the sign-in surface"
       }
     ]
   }

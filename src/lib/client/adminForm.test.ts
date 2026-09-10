@@ -62,6 +62,7 @@ describe('createReservation', () => {
     });
     expect(fetcher).toHaveBeenCalledWith('/api/admin/reservations', {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'alice', reason: 'Staff name' })
     });
   });
@@ -158,6 +159,7 @@ describe('forceReleaseIdentifier', () => {
     });
     expect(fetcher).toHaveBeenCalledWith('/api/admin/force-release', {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'alice', reason: 'Inactive account' })
     });
   });

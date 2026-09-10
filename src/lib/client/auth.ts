@@ -19,6 +19,7 @@ export function buildAuthEventTemplate(origin: string, challenge: string): Event
 async function requestChallenge(pubkey: string): Promise<string> {
   const response = await fetch('/auth/challenge', {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ pubkey })
   });
   if (!response.ok) {
@@ -31,6 +32,7 @@ async function requestChallenge(pubkey: string): Promise<string> {
 async function submitSignedEvent(event: Event): Promise<void> {
   const response = await fetch('/auth/verify', {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ event })
   });
   if (!response.ok) {

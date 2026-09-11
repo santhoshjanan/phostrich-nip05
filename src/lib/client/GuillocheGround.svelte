@@ -10,9 +10,9 @@
   let canvas: HTMLCanvasElement;
 
   const ROSETTES = [
-    { R: 0.46, r: 0.128, d: 0.19, turns: 60, speed: 0.006, alpha: 0.042 },
-    { R: 0.34, r: 0.052, d: 0.1, turns: 42, speed: -0.009, alpha: 0.038 },
-    { R: 0.6, r: 0.21, d: 0.075, turns: 34, speed: 0.004, alpha: 0.03 }
+    { R: 0.46, r: 0.128, d: 0.19, turns: 60, speed: 0.003, alpha: 0.026 },
+    { R: 0.34, r: 0.052, d: 0.1, turns: 42, speed: -0.0045, alpha: 0.024 },
+    { R: 0.6, r: 0.21, d: 0.075, turns: 34, speed: 0.002, alpha: 0.019 }
   ];
 
   onMount(() => {
@@ -123,8 +123,16 @@
     height: 100%;
     z-index: 0;
     pointer-events: none;
-    /* Fades the pattern out toward the edges so it never crowds the viewport frame. */
-    -webkit-mask-image: radial-gradient(145% 120% at 50% 38%, #000 58%, transparent 100%);
-    mask-image: radial-gradient(145% 120% at 50% 38%, #000 58%, transparent 100%);
+    /* Fades the pattern out toward the edges so it never crowds the viewport frame,
+       and dims it again across the readable content column so lines never run
+       directly under body text — it stays a page-margin texture, not a text overlay. */
+    -webkit-mask-image:
+      radial-gradient(145% 120% at 50% 38%, #000 58%, transparent 100%),
+      radial-gradient(70% 62% at 50% 42%, transparent 0%, #000 85%);
+    mask-image:
+      radial-gradient(145% 120% at 50% 38%, #000 58%, transparent 100%),
+      radial-gradient(70% 62% at 50% 42%, transparent 0%, #000 85%);
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
   }
 </style>

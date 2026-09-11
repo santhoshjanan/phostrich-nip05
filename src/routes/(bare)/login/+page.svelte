@@ -83,8 +83,43 @@
   // a method is chosen, so "sign a challenge" is something you can see rather
   // than a phrase. Not the real challenge — that's issued when you sign in.
   const CHALLENGE_LEN = 64;
-  let challengeShown = $state('');
+  // One span per character, always present — revealing a character only ever
+  // toggles a class on its own span, never changes text content or adds/
+  // removes DOM nodes. Splitting the reveal into two variable-length runs
+  // (an earlier version of this) measurably shifted Chromium's line-wrap at
+  // certain split ratios, which read as the whole panel jumping mid-stream.
+  // Placeholder chars are SSR-safe (known before any JS runs) and reserve the
+  // full width from the very first paint; the real sample overwrites them
+  // once per stream start, never per frame.
+  let challengeChars = $state<string[]>(Array.from({ length: CHALLENGE_LEN }, () => 'f'));
+  let revealedCount = $state(0);
   let streaming = $state(false);
+
+  // The blinking caret is positioned in pixels, not by moving it through the
+  // character list in the DOM — an earlier version inserted/removed it at the
+  // reveal boundary every frame, and that DOM churn (destroying and
+  // recreating a conditional block 60x/sec) measurably perturbed Chromium's
+  // line-wrap for a frame at a time, which read as the panel twitching
+  // vertically mid-stream. `position: absolute` takes it out of flow so it
+  // can never affect the text's own wrapping, however it moves.
+  let chalEl = $state<HTMLElement>();
+  let caretEl = $state<HTMLElement>();
+  let caretIdle = $state(true);
+  $effect(() => {
+    if (!chalEl || !caretEl) return;
+    if (!streaming) {
+      caretIdle = true;
+      return;
+    }
+    const chars = chalEl.querySelectorAll<HTMLElement>('.chal-char');
+    const target = chars[revealedCount] ?? chars[chars.length - 1];
+    if (!target) return;
+    const wrapRect = chalEl.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    caretEl.style.left = `${targetRect.left - wrapRect.left}px`;
+    caretEl.style.top = `${targetRect.top - wrapRect.top}px`;
+    caretIdle = false;
+  });
 
   function sampleHex(len: number): string {
     const bytes = new Uint8Array(len / 2);
@@ -112,24 +147,25 @@
   $effect(() => {
     void method;
     const full = sampleHex(CHALLENGE_LEN);
+    challengeChars = full.split('');
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     if (reduce) {
-      challengeShown = full;
+      revealedCount = CHALLENGE_LEN;
       streaming = false;
       return;
     }
 
-    challengeShown = '';
+    revealedCount = 0;
     streaming = true;
     const started = performance.now();
     let raf = requestAnimationFrame(function step(now) {
       const p = Math.min(1, (now - started) / STREAM_MS);
-      challengeShown = full.slice(0, Math.floor(p * full.length));
+      revealedCount = Math.floor(p * CHALLENGE_LEN);
       if (p < 1) {
         raf = requestAnimationFrame(step);
       } else {
-        challengeShown = full;
+        revealedCount = CHALLENGE_LEN;
         streaming = false;
       }
     });
@@ -227,28 +263,41 @@
         </button>
       </div>
 
-      {#if method === 'extension'}
-        <div id="panel-extension" role="tabpanel" aria-labelledby="tab-extension">
-          {#if hasExtension}
-            <p class="method-note">
+      <div class="panel-wrap">
+        <div
+          id="panel-extension"
+          role="tabpanel"
+          aria-labelledby="tab-extension"
+          class:panel--inactive={method !== 'extension'}
+          inert={method !== 'extension'}
+        >
+          <div class="note-stack">
+            <p class="method-note" class:panel--inactive={!hasExtension} inert={!hasExtension}>
               Signs the challenge locally through your installed extension (e.g. Alby, nos2x).
             </p>
-            <button onclick={handleExtensionSignIn} disabled={status === 'connecting'}>
-              {status === 'connecting' ? 'Signing in…' : 'Sign in with extension'}
-            </button>
-          {:else}
-            <p class="method-note">
+            <p class="method-note" class:panel--inactive={hasExtension} inert={hasExtension}>
               No browser extension was detected. Install one such as
               <a href="https://getalby.com" target="_blank" rel="noreferrer">Alby</a>
               or
               <a href="https://github.com/fiatjaf/nos2x" target="_blank" rel="noreferrer">nos2x</a>,
               or sign in with a remote signer instead.
             </p>
-            <button disabled>Sign in with extension</button>
-          {/if}
+          </div>
+          <button
+            onclick={handleExtensionSignIn}
+            disabled={!hasExtension || status === 'connecting'}
+          >
+            {status === 'connecting' ? 'Signing in…' : 'Sign in with extension'}
+          </button>
         </div>
-      {:else}
-        <div id="panel-bunker" role="tabpanel" aria-labelledby="tab-bunker">
+
+        <div
+          id="panel-bunker"
+          role="tabpanel"
+          aria-labelledby="tab-bunker"
+          class:panel--inactive={method !== 'bunker'}
+          inert={method !== 'bunker'}
+        >
           <p class="method-note">
             Connect a remote "bunker" signer. This round-trips over relays, so it can take a moment.
           </p>
@@ -258,7 +307,7 @@
             {status === 'connecting' ? 'Connecting…' : 'Connect'}
           </button>
         </div>
-      {/if}
+      </div>
 
       {#if status === 'error'}
         <p class="error" role="alert">{errorMessage}</p>
@@ -267,8 +316,13 @@
       <div class="challenge" aria-hidden="true">
         <span class="ledger-label">Challenge · sample</span>
         <pre class="challenge__event"><code
-            >{EVENT_HEAD}<span class="chal">{challengeShown}</span>{#if streaming}<span
-                class="caret"></span>{/if}{EVENT_TAIL}</code
+            >{EVENT_HEAD}<span class="chal" bind:this={chalEl}>{#each challengeChars as c, i (i)}<span
+                  class="chal-char"
+                  class:chal-char--hidden={i >= revealedCount}>{c}</span
+                >{/each}<span
+                class="caret"
+                class:caret--idle={caretIdle}
+                bind:this={caretEl}></span></span>{EVENT_TAIL}</code
           ></pre>
         <p class="challenge__note">
           Your signer signs this NIP-98 event. Phostrich checks the signature against your public
@@ -332,8 +386,9 @@
 
   .tagline {
     margin: 0;
-    font-size: 0.875rem;
-    letter-spacing: 0.02em;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
     color: var(--color-ink-muted);
   }
 
@@ -382,6 +437,7 @@
   .def-row dd {
     margin: 0;
     font-size: 0.875rem;
+    font-weight: 500;
     line-height: 1.55;
     color: var(--color-ink-muted);
   }
@@ -405,6 +461,7 @@
     margin: 0 0 var(--space-3);
     color: var(--color-ink-muted);
     font-size: 0.875rem;
+    font-weight: 500;
     line-height: 1.5;
   }
 
@@ -456,10 +513,30 @@
     color: var(--color-canvas);
   }
 
+  /* Both tab panels occupy the same grid cell, so the wrapper is always as
+     tall as the tallest one and switching tabs cannot move anything — the
+     card, and the copy centered alongside it, hold their position. The same
+     stacking handles the two extension notes, whose height differs and which
+     swap on their own when a late-injecting extension is detected. */
+  .panel-wrap,
+  .note-stack {
+    display: grid;
+  }
+  .panel-wrap > [role='tabpanel'],
+  .note-stack > .method-note {
+    grid-area: 1 / 1;
+  }
+  /* Held in layout (so it keeps reserving its height) but unpainted,
+     unfocusable, and out of the accessibility tree. */
+  .panel--inactive {
+    visibility: hidden;
+  }
+
   .method-note {
     margin: 0 0 var(--space-2);
     color: var(--color-ink-muted);
     font-size: 0.875rem;
+    font-weight: 500;
     line-height: 1.5;
   }
 
@@ -506,16 +583,29 @@
     font-size: inherit;
   }
   .chal {
+    position: relative;
     overflow-wrap: anywhere;
   }
+  /* Every character keeps its own permanent span from the moment a sample is
+     drawn — revealing it only ever toggles this class. Content and DOM
+     structure never change mid-stream, so the block's wrap can't shift. */
+  .chal-char--hidden {
+    visibility: hidden;
+  }
+  /* Positioned in pixels (via the script's effect), not by living inside the
+     character list — `position: absolute` takes it fully out of flow so its
+     movement can never itself affect how the text wraps. */
   .caret {
-    display: inline-block;
+    position: absolute;
     width: 0.5ch;
     height: 1.05em;
-    vertical-align: text-bottom;
     background: var(--color-ink);
     translate: 0 0.15em;
     animation: caret-blink 1.1s steps(1) infinite;
+  }
+  .caret--idle {
+    visibility: hidden;
+    animation: none;
   }
   @keyframes caret-blink {
     0%,
@@ -535,6 +625,7 @@
   .challenge__note {
     margin: var(--space-1) 0 0;
     font-size: 0.875rem;
+    font-weight: 500;
     line-height: 1.5;
     color: var(--color-ink-muted);
   }

@@ -2,6 +2,7 @@
   import { goto } from '$app/navigation';
   import { fade, scale } from 'svelte/transition';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
+  import PageMeta from '$lib/client/PageMeta.svelte';
   import {
     checkAvailability,
     debounce,
@@ -67,6 +68,12 @@
     }
   }
 </script>
+
+<PageMeta
+  title="Claim your identifier"
+  description="Check whether a name is available and claim it for your Nostr key."
+  noindex
+/>
 
 <CredentialCard title="Claim your identifier">
   <label for="name" class="ledger-label">Identifier name</label>

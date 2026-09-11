@@ -3,6 +3,7 @@
   import { tick } from 'svelte';
   import { fade, scale } from 'svelte/transition';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
+  import PageMeta from '$lib/client/PageMeta.svelte';
   import {
     eligibleForReleaseDate,
     parseRelayError,
@@ -172,6 +173,12 @@
     }
   }
 </script>
+
+<PageMeta
+  title="Account"
+  description="Manage the NIP-05 identifier issued to your Nostr key, its relays, and its release."
+  noindex
+/>
 
 <CredentialCard title="Account">
   <div class="ledger-row account-name">

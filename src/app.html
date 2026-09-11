@@ -3,6 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- The ledger ground is a light-only world; declaring it stops mobile
+         browsers force-darkening the palette and tints their own chrome. -->
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f5f3f8" />
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

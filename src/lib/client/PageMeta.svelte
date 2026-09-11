@@ -1,13 +1,11 @@
 <script lang="ts">
-  import { PUBLIC_ORIGIN } from '$env/static/public';
+  import { SITE_NAME, SITE_ORIGIN } from './site';
 
-  // Per-route document head.
+  // Per-route document head. The origin comes from a plain constant — see
+  // site.ts for why not `$app/state` or either env module.
   //
-  // The absolute origin comes from PUBLIC_ORIGIN, which SvelteKit inlines at
-  // build time — deliberately not from `$app/state`, whose `page` boots the
-  // client runtime on import and breaks component tests that render a page
-  // directly. `path` is opt-in: canonical and og:url are only meaningful on
-  // the indexable route, and the signed-in routes that omit it are noindex.
+  // `path` is opt-in: canonical and og:url are only meaningful on the one
+  // indexable route, and the signed-in routes that omit it are noindex.
   interface Props {
     /** Page-specific half of the title; the site name is appended. */
     title: string;
@@ -19,9 +17,8 @@
   }
   let { title, description, path, noindex = false }: Props = $props();
 
-  const SITE_NAME = 'Phostrich';
   const fullTitle = $derived(`${title} · ${SITE_NAME}`);
-  const canonical = $derived(path ? `${PUBLIC_ORIGIN}${path}` : undefined);
+  const canonical = $derived(path ? `${SITE_ORIGIN}${path}` : undefined);
 </script>
 
 <svelte:head>

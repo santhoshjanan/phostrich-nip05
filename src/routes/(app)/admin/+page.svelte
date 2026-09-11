@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
+  import PageMeta from '$lib/client/PageMeta.svelte';
   import {
     createReservation,
     forceReleaseIdentifier,
@@ -175,6 +176,12 @@
     }
   }
 </script>
+
+<PageMeta
+  title="Admin"
+  description="Reserved names and identifiers eligible for release."
+  noindex
+/>
 
 <CredentialCard title="Admin" wide>
   <section aria-labelledby="stale-heading">

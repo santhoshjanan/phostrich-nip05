@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
+  import PageMeta from '$lib/client/PageMeta.svelte';
   interface Props {
     data: { identifier: string; issuedAt: string | Date };
   }
@@ -33,6 +34,12 @@
     }
   }
 </script>
+
+<PageMeta
+  title="Identifier issued"
+  description="Your NIP-05 identifier is issued and resolving at /.well-known/nostr.json."
+  noindex
+/>
 
 <CredentialCard title="Identifier issued">
   <div class="ledger-row name-row">

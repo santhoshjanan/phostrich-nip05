@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import CredentialCard from '$lib/client/CredentialCard.svelte';
   import GuillocheGround from '$lib/client/GuillocheGround.svelte';
+  import PageMeta from '$lib/client/PageMeta.svelte';
   import { signInWithBunker, signInWithExtension } from '$lib/client/auth';
 
   type Method = 'extension' | 'bunker';
@@ -174,6 +175,12 @@
   });
 </script>
 
+<PageMeta
+  title="NIP-05 identifiers for Nostr"
+  path="/login"
+  description="Claim a human-readable NIP-05 identifier for your Nostr key — you@phostrich.com — resolvable by every NIP-05-aware client. No email and no password: you prove the key is yours by signing a one-time challenge with a browser extension (NIP-07) or a remote signer (NIP-46)."
+/>
+
 <GuillocheGround />
 
 <div class="login-desk">
@@ -217,6 +224,26 @@
         <dd>
           An identifier with no lookups for six months becomes eligible for release. Stated here, at
           claim time — never delivered as a later surprise.
+        </dd>
+      </div>
+      <div class="def-row">
+        <dt class="ledger-label">No signer yet</dt>
+        <dd>
+          Nostr Signer is a desktop bunker for macOS, Windows and Linux — your key stays on your
+          machine, encrypted by the OS keychain, and every request waits for your approval. Also
+          ours.
+          <a
+            class="signer-link"
+            href="https://github.com/santhoshjanan/nostr-signer"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Download Nostr Signer
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+              <path d="M5.5 10.5 10.5 5.5" />
+              <path d="M6.75 5.5h3.75v3.75" />
+            </svg>
+          </a>
         </dd>
       </div>
     </dl>
@@ -300,6 +327,10 @@
         >
           <p class="method-note">
             Connect a remote "bunker" signer. This round-trips over relays, so it can take a moment.
+            No bunker yet? We make one —
+            <a href="https://github.com/santhoshjanan/nostr-signer" target="_blank" rel="noreferrer"
+              >Nostr Signer</a
+            >, for desktop.
           </p>
           <label for="bunker-uri">Remote signer connection</label>
           <input id="bunker-uri" bind:value={bunkerUri} placeholder="bunker://…" />
@@ -443,6 +474,33 @@
   }
   .def-row .ledger-label {
     padding-top: 0.1rem;
+  }
+
+  /* Sits on its own line so it reads as the action the row resolves to,
+     while staying plain ruled text — a button here would turn a genuine
+     answer to "where do I get a signer" into a pitch. */
+  .signer-link {
+    /* Own line, sized to its text: a clear target without becoming a button. */
+    display: flex;
+    width: fit-content;
+    align-items: center;
+    gap: 0.3rem;
+    margin-top: 0.45rem;
+    color: var(--color-ink);
+    font-weight: 500;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.15em;
+  }
+  .signer-link svg {
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .signer-link:hover {
+    color: var(--color-ink-muted);
   }
 
   @media (max-width: 30rem) {
